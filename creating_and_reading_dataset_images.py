@@ -6,7 +6,7 @@ from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
 
 CREATE = False  # Set to True to create a new dataset, False to read an existing one
-
+project_dir = os.path.dirname(os.path.abspath(__file__))
 
 class ZarrDataset(torch.utils.data.Dataset):
     def __init__(self, path, transforms=None):
@@ -34,7 +34,7 @@ class ZarrDataset(torch.utils.data.Dataset):
 if __name__ == "__main__":
     if CREATE:
         # 1.1 Define output directory
-        store_path = "my_data.zip"
+        store_path = f"{project_dir}/my_data.zarr"
         if os.path.exists(store_path):
             # remove old store if rerunning
             import shutil; shutil.rmtree(store_path)
@@ -42,9 +42,10 @@ if __name__ == "__main__":
         # 1.2 Create a Zarr group (directory)
         root = zarr.open(store_path, mode="w")
 
+
         # 1.3 Create one or more arrays inside the group
         #      Here: 10 000 samples of 3×64×64 images and a matching label vector.
-        num_samples =   10_000
+        num_samples =   1_000
         img_shape   = (3, 64, 64)
 
         # Chunking: e.g. 100 samples per chunk
@@ -77,7 +78,7 @@ if __name__ == "__main__":
         grid_size = int(n**0.5)
 
         # Apri dataset e DataLoader con batch_size=n
-        dataset = ZarrDataset("my_data.zip")
+        dataset = ZarrDataset(f"{project_dir}/my_data.zarr")
         loader = DataLoader(dataset, batch_size=n, shuffle=True)
 
         # Prendi un batch di n immagini
