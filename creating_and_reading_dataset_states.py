@@ -1,95 +1,110 @@
+import os
 import numpy as np
 import zarr
-import os
-import torch
-from torch.utils.data import DataLoader
-import matplotlib.pyplot as plt
 
-CREATE = False  # Set to True to create a new dataset, False to read an existing one
-project_dir = os.path.dirname(os.path.abspath(__file__))
+# ------------------------------------------------------------
+# CONFIGURE THESE PATHS AS NEEDED
+# ------------------------------------------------------------
+project_dir   = os.path.dirname(os.path.abspath(__file__))
+npz_filename  = os.path.join(project_dir, "pushing_dataset.npz")
+zarr_filename = os.path.join(project_dir, "my_data.zarr.zip")
+# ------------------------------------------------------------
 
-class ZarrDataset(torch.utils.data.Dataset):
-    def __init__(self, path, transforms=None):
-        self.store  = zarr.open(path, mode="r")
-        self.states = self.store["states"]
-        self.actions = self.store["actions"]
-        assert len(self.states) == len(self.actions), "Mismatched lengths"
-        self.transforms = transforms
+def create_zarr_from_npz(npz_path: str, zarr_path: str):
+    """
+    Reads 'observations', 'actions', and 'episode_ends' from the given .npz,
+    then writes them into a compressed Zarr-Zip store with this structure:
 
-    def __len__(self):
-        return len(self.states)
+    my_data.zarr.zip/
+      ├── data/
+      │    ├── state          (shape: [N, obs_dim],   dtype=float32)
+      │    └── action         (shape: [N, action_dim],dtype=float32)
+      └── meta/
+           └── episode_ends   (shape: [E],            dtype=int64)
+    """
+    # 1) Load arrays from .npz
+    data = np.load(npz_path)
+    print(data)
+    if "observations" not in data or "actions" not in data or "episode_ends" not in data:
+        raise KeyError(
+            "The .npz must contain exactly these three keys: "
+            "'observations', 'actions', and 'episode_ends'."
+        )
 
-    def __getitem__(self, idx):
-        state = self.states[idx]     # OBSERVATION: numpy array (O+1, 2): O+1: Objects state dimension + robot ee state, 2: x,y position 
-        action = self.actions[idx]  # ACTION: numpy array (2): x, y desired ee position
+    observations = data["observations"]    # shape (N, O+1, 2)
+    actions      = data["actions"]         # shape (N, 2)
+    episode_ends  = data["episode_ends"]   # shape (E,)
 
-        state = torch.from_numpy(state).float()
-        action = torch.tensor(action).float()
+    N_obs = observations.shape[0]
+    N_act = actions.shape[0]
+    if N_obs != N_act:
+        raise ValueError(
+            f"Length mismatch: observations has {N_obs}, actions has {N_act}"
+        )
 
-        if self.transforms:
-            state = self.transforms(state)
+    # 2) Flatten observations into (N, obs_dim)
+    #    Here obs_dim = (O+1)*2
+    obs_flat = observations.reshape(N_obs, -1).astype("float32")
+    act_flat = actions.astype("float32")
+    ep_ends  = episode_ends.astype("int64")
 
-        return state, action
+    # 3) Remove any existing Zarr‐Zip so we can create afresh
+    if os.path.exists(zarr_path):
+        print(f"Removing existing store at {zarr_path} …")
+        os.remove(zarr_path)
+
+    # 4) Create a new ZipStore and root group
+    zstore = zarr.ZipStore(zarr_path, mode="w")
+    root = zarr.group(store=zstore, overwrite=True)
+
+    # 5) Create subgroups "data" and "meta"
+    data_grp = root.create_group("data")
+    meta_grp = root.create_group("meta")
+
+    # 6) Determine chunk shapes (tune chunk sizes to your preference)
+    obs_dim = obs_flat.shape[1]
+    act_dim = act_flat.shape[1]
+    chunk_samples = min(100, N_obs)
+
+    state_chunks  = (chunk_samples, obs_dim)
+    action_chunks = (chunk_samples, act_dim)
+
+    # 7) Create the two datasets under data/
+    data_grp.create_dataset(
+        name="state",
+        shape=(N_obs, obs_dim),
+        chunks=state_chunks,
+        dtype="float32",
+        compressor=zarr.Blosc(cname="zstd", clevel=3),
+    )
+    data_grp.create_dataset(
+        name="action",
+        shape=(N_obs, act_dim),
+        chunks=action_chunks,
+        dtype="float32",
+        compressor=zarr.Blosc(cname="zstd", clevel=3),
+    )
+
+    # 8) Create the episode_ends dataset under meta/
+    meta_grp.create_dataset(
+        name="episode_ends",
+        data=ep_ends,
+        dtype="int64",
+        compressor=zarr.Blosc(cname="zstd", clevel=3),
+    )
+
+    # 9) Write data into the Zarr datasets
+    data_grp["state"][:]  = obs_flat
+    data_grp["action"][:] = act_flat
+    # episode_ends was passed to create_dataset, so it’s already stored
+
+    zstore.close()
+    print(f"Successfully wrote Zarr‐Zip store to: {zarr_path}")
+    print(f"  data/state    shape = {obs_flat.shape}, dtype=float32")
+    print(f"  data/action   shape = {act_flat.shape}, dtype=float32")
+    print(f"  meta/episode_ends shape = {ep_ends.shape}, dtype=int64")
+
 
 if __name__ == "__main__":
-    if CREATE:
-        # 1.1 Define output directory
-        store_path = f"{project_dir}/my_data.zarr"
-        if os.path.exists(store_path):
-            # remove old store if rerunning
-            import shutil; shutil.rmtree(store_path)
-
-        # 1.2 Create a Zarr group (directory)
-        root = zarr.open(store_path, mode="w")
-
-        num_samples =   1_000
-        object_dim = 10
-        state_shape = (object_dim + 1, 2)
-        action_shape = (2,)
-
-        # Chunking: e.g. 100 samples per chunk
-        state_chunks = (100, *state_shape)
-        action_chunks = (100, *action_shape)
-
-        root.create_dataset(
-            name="states",
-            shape=(num_samples, *state_shape),
-            chunks=state_chunks,
-            dtype="uint8",
-            compressor=zarr.Blosc(cname="zstd", clevel=3),
-        )
-
-        root.create_dataset(
-            name="actions",
-            shape=(num_samples, *action_shape),
-            chunks=action_chunks,
-            dtype="int64",
-            compressor=zarr.Blosc(cname="zstd", clevel=3),
-        )
-
-        # 1.4 Fill with dummy data (or your real arrays)
-        #     Here we write random, but you’d write your prepared numpy arrays.
-        root["states"][:] = np.random.rand(num_samples, *(state_shape)).astype("float32")
-        root["actions"][:] = np.random.rand(num_samples, *(action_shape)).astype("float32")
-
-        print("Zarr store created at", store_path)
-    else:
-        # ------------------------------------------------------------
-        # Reading branch: load states + actions in batches and inspect
-        # ------------------------------------------------------------
-        batch_size = 8
-
-        dataset = ZarrDataset(os.path.join(project_dir, "my_data.zarr"))
-        loader  = DataLoader(dataset, batch_size=batch_size, shuffle=True)
-
-        # Get one batch
-        states_batch, actions_batch = next(iter(loader))
-        # states_batch: (batch_size, O+1, 2)
-        # actions_batch: (batch_size, 2)
-
-        # Simple sanity check: print shapes and a small sample
-        print(f"states_batch.shape = {states_batch.shape}")   # expect (8, O+1, 2)
-        print(f"actions_batch.shape = {actions_batch.shape}") # expect (8, 2) 
-        print("\nExample [first sample] in batch:")
-        print(" state  =", states_batch[0])
-        print(" action =", actions_batch[0])
+    print("==> Reading pushing_dataset.npz and writing to Zarr‐Zip …")
+    create_zarr_from_npz(npz_path=npz_filename, zarr_path=zarr_filename)

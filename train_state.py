@@ -16,7 +16,7 @@ from diffusion_mk2.dataset.pusht_state_dataset import PushTStateDataset
 
 
 
-OBS_DIM = 5
+OBS_DIM = 32
 OBS_HORIZON = 2
 ACTION_DIM = 2
 ACTION_HORIZON = 8
@@ -30,7 +30,7 @@ DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
 
 # download demonstration data from Google Drive
-dataset_path = "pusht_cchi_v7_replay.zarr.zip"
+dataset_path = "my_data.zarr.zip"
 if not os.path.isfile(dataset_path):
     id = "1KY1InLurpMvJDRb14L9NlXT_fEsCvVUq&confirm=t"
     gdown.download(id=id, output=dataset_path, quiet=False)
@@ -48,7 +48,7 @@ stats = dataset.stats
 # create dataloader
 dataloader = torch.utils.data.DataLoader(
     dataset,
-    batch_size=256,
+    batch_size=16,
     num_workers=1,
     shuffle=True,
     # accelerate cpu-gpu transfer

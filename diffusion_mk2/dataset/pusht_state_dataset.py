@@ -118,9 +118,10 @@ class PushTStateDataset(torch.utils.data.Dataset):
             # (N, obs_dim)
             'obs': dataset_root['data']['state'][:]
         }
+        print(train_data['obs'].shape, train_data['action'].shape)
         # Marks one-past the last index for each episode
         episode_ends = dataset_root['meta']['episode_ends'][:]
-
+        self.episode_ends = episode_ends
         # compute start and end of each state-action sequence
         # also handles padding
         indices = create_sample_indices(
@@ -166,3 +167,24 @@ class PushTStateDataset(torch.utils.data.Dataset):
         # discard unused observations
         nsample['obs'] = nsample['obs'][:self.obs_horizon,:]
         return nsample
+    
+
+if __name__ == "__main__":
+    # Example usage
+    dataset = PushTStateDataset(
+        dataset_path='my_data.zarr.zip',
+        pred_horizon=1,
+        obs_horizon=1,
+        action_horizon=1
+    )
+    
+    print("Dataset length:", len(dataset))
+    sample = dataset[3]
+    print(sample)
+    print("episode ends:", dataset.episode_ends)
+    # print("Sample keys:", sample.keys())
+    # print("Sample obs shape:", sample['obs'].shape)
+    # print("Sample action shape:", sample['action'].shape)
+    # print("Stats:", dataset.stats)
+    # print("First 20 obs:", sample['obs'])
+    # print("First 20 actions:", sample['action'][:20])
