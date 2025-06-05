@@ -1,0 +1,31 @@
+<?xml version="1.0"?>
+<robot name="SimpleTable">
+    <link name="world"/>
+
+    <!-- Weld ‘table_link’ to ‘world’ with a fixed joint -->
+    <joint name="fixed" type="fixed">
+        <parent link="world"/>
+        <child  link="SimpleTable"/>
+        <!-- Optionally set an offset -->
+        <origin xyz="0 0 0" rpy="0 0 0"/>
+    </joint>
+
+    <link name="SimpleTable">
+        <visual>
+            <origin rpy="0 0 0" xyz="0 0 0"/>
+            <geometry>
+                <mesh filename="SimpleTable.obj"/>
+            </geometry>
+        </visual>
+
+        <collision>
+            <geometry>
+                <mesh filename="SimpleTable.obj"/>
+            </geometry>
+            <origin rpy="0 0 0" xyz="0 0 0"/>
+        </collision>
+    </link>
+
+
+</robot>
+

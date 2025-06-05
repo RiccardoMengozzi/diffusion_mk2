@@ -1,0 +1,20 @@
+<?xml version="1.0"?>
+<robot name="table">
+  <link name="table">
+    <visual>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+      <geometry>
+        <mesh filename="SimpleTable.obj"/>
+      </geometry>
+    </visual>
+
+    <collision>
+      <geometry>
+        <mesh filename="SimpleTable.obj"/>
+      </geometry>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+    </collision>
+  </link>
+
+</robot>
+

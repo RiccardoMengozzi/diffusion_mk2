@@ -1,9 +1,10 @@
+import os
 import torch
 import torch.nn as nn
 import numpy as np
 from tqdm import tqdm
-import os
 import gdown
+import wandb
 
 from diffusers.training_utils import EMAModel
 from diffusers import get_scheduler
@@ -13,152 +14,218 @@ from diffusion_mk2.model.diffusion.conditional_unet_1d import ConditionalUnet1D
 from diffusion_mk2.dataset.pusht_state_dataset import PushTStateDataset
 
 
+hyperparameters = {
+    "obs_dim": 32,
+    "obs_horizon": 2,
+    "action_dim": 2,
+    "action_horizon": 8,
+    "pred_horizon": 16,
+    "num_diffusion_iters": 100,
+    "num_epochs": 1,
+    "batch_size": 256,
+    "lr": 1e-4,
+    "weight_decay": 1e-6,
+    "warmup_steps": 500,
+    "ema_power": 0.75,
+    "device": torch.device("cuda"),  # Will default to CUDA if available
+    "model_save_path": "ema_diffusion_model.pt",
+
+    # wandb
+    "project_name": "diffusion_model",
+    "entity": "riccardo_mengozzi",
+    "dataset_url_id": "1KY1InLurpMvJDRb14L9NlXT_fEsCvVUq",
+    "dataset_filename": "pushing_dataset.zarr.zip",
+}
+
+class DiffusionTrainer:
+    def __init__(
+        self,
+        config: dict,
+    ):
+        
+        self.OBS_DIM = config.get("obs_dim", 32)
+        self.OBS_HORIZON = config.get("obs_horizon", 2)
+        self.ACTION_DIM = config.get("action_dim", 2)
+        self.ACTION_HORIZON = config.get("action_horizon", 8)   
+        self.PRED_HORIZON = config.get("pred_horizon", 16)
+        self.NUM_DIFFUSION_ITERS = config.get("num_diffusion_iters", 100)
+        self.NUM_EPOCHS = config.get("num_epochs", 10)
+        self.BATCH_SIZE = config.get("batch_size", 16)
+        self.LR = config.get("lr", 1e-4)
+        self.WEIGHT_DECAY = config.get("weight_decay", 1e-6)
+        self.WARMUP_STEPS = config.get("warmup_steps", 500)
+        self.EMA_POWER = config.get("ema_power", 0.75)
 
 
+        self.DEVICE = config.get("device", torch.device("cuda" if torch.cuda.is_available() else "cpu"))
+        self.DATASET_FILENAME = config.get("dataset_filename", "pushing_dataset.zarr.zip")
+        self.MODEL_SAVE_PATH = config.get("model_save_path", "ema_diffusion_model.pt")
+        
+        #wandb
+        self.project_name = config.get("project_name", "diffusion_model")
+        self.entity = config.get("entity", "riccardo_mengozzi")
 
-OBS_DIM = 32
-OBS_HORIZON = 2
-ACTION_DIM = 2
-ACTION_HORIZON = 8
-PRED_HORIZON = 16
-NUM_DIFFUSION_ITERS = 100
+        # Initialize wandb
+        self.run = wandb.init(
+            config=config,
+            project=self.project_name,
+            entity=self.entity,
+            mode="disabled"
+        )
+
+        # Download dataset if needed
+        self.dataset_path = self.DATASET_FILENAME
+        self._ensure_dataset_downloaded()
+
+        # Build dataset and dataloader
+        self.dataset = PushTStateDataset(
+            dataset_path=self.dataset_path,
+            pred_horizon=self.PRED_HORIZON,
+            obs_horizon=self.OBS_HORIZON,
+            action_horizon=self.ACTION_HORIZON
+        )
+        self.stats = self.dataset.stats
+
+        self.dataloader = torch.utils.data.DataLoader(
+            self.dataset,
+            batch_size=self.BATCH_SIZE,
+            num_workers=1,
+            shuffle=True,
+            pin_memory=True,
+            persistent_workers=True
+        )
+
+        # Build diffusion components
+        self.noise_scheduler = DDPMScheduler(
+            num_train_timesteps=self.NUM_DIFFUSION_ITERS,
+            beta_schedule="squaredcos_cap_v2",
+            clip_sample=True,
+            prediction_type="epsilon"
+        )
+
+        self.noise_pred_net = ConditionalUnet1D(
+            input_dim=self.ACTION_DIM,
+            global_cond_dim=self.OBS_DIM * self.OBS_HORIZON,
+        ).to(self.DEVICE)
+
+        # EMA wrapper
+        self.ema = EMAModel(
+            parameters=self.noise_pred_net.parameters(),
+            power=self.EMA_POWER
+        )
+
+        # Optimizer + LR scheduler
+        self.optimizer = torch.optim.AdamW(
+            params=self.noise_pred_net.parameters(),
+            lr=self.LR,
+            weight_decay=self.WEIGHT_DECAY
+        )
+        total_training_steps = len(self.dataloader) * self.NUM_EPOCHS
+        self.lr_scheduler = get_scheduler(
+            name="cosine",
+            optimizer=self.optimizer,
+            num_warmup_steps=self.WARMUP_STEPS,
+            num_training_steps=total_training_steps
+        )
+
+        # Tracking
+        self.global_step = 0
+
+    def _ensure_dataset_downloaded(self):
+        if not os.path.isfile(self.dataset_path):
+            gdown.download(
+                id=self.dataset_url_id,
+                output=self.dataset_path,
+                quiet=False
+            )
+
+    def train(self):
+        """
+        Run the training loop for NUM_EPOCHS. After training completes,
+        the EMA‐weighted model is copied and saved to `self.model_save_path`.
+        """
+        with tqdm(range(self.NUM_EPOCHS), desc="Epoch") as epoch_bar:
+            for epoch_idx in epoch_bar:
+                epoch_losses = []
+                with tqdm(self.dataloader, desc="Batch", leave=False) as batch_bar:
+                    for batch in batch_bar:
+                        loss_value = self._train_on_batch(batch)
+                        epoch_losses.append(loss_value)
+                        batch_bar.set_postfix(loss=loss_value)
+                        wandb.log({"loss": loss_value}, step=self.global_step)
+                        self.global_step += 1
+
+                avg_loss = float(np.mean(epoch_losses))
+                epoch_bar.set_postfix(avg_loss=avg_loss)
+
+        # After all epochs: copy EMA weights and save model
+        ema_model = ConditionalUnet1D(
+            input_dim=self.ACTION_DIM,
+            global_cond_dim=self.OBS_DIM * self.OBS_HORIZON,
+        ).to(self.DEVICE)
+        self.ema.copy_to(ema_model.parameters())
+        torch.save(
+            {
+                "model_state_dict": ema_model.state_dict(),
+                "obs_dim": self.OBS_DIM,
+                "obs_horizon": self.OBS_HORIZON,
+                "action_dim": self.ACTION_DIM,
+                "action_horizon": self.ACTION_HORIZON,
+                "pred_horizon": self.PRED_HORIZON,
+                "noise_scheduler_config": self.noise_scheduler.config,
+                "dataset_stats": self.stats,
+            },
+            self.MODEL_SAVE_PATH
+        )
+        print(f"EMA model saved to {self.MODEL_SAVE_PATH}")
+
+    def _train_on_batch(self, batch: dict) -> float:
+        """
+        Performs one gradient step on a single batch and updates EMA.
+        Returns the scalar loss value.
+        """
+        self.noise_pred_net.train()
+
+        # Move data to device
+        obs = batch["obs"].to(self.DEVICE)  # shape: (B, OBS_HORIZON, OBS_DIM) + possibly future
+        actions = batch["action"].to(self.DEVICE)  # shape: (B, ACTION_HORIZON, ACTION_DIM)
+        batch_size = obs.shape[0]
+
+        # Flatten observation for FiLM conditioning
+        obs_cond = obs[:, : self.OBS_HORIZON, :].flatten(start_dim=1)  # (B, OBS_HORIZON * OBS_DIM)
+
+        # Sample random noise and timesteps
+        noise = torch.randn_like(actions)
+        timesteps = torch.randint(
+            0,
+            self.noise_scheduler.config.num_train_timesteps,
+            (batch_size,),
+            device=self.DEVICE
+        ).long()
+
+        # Add noise (forward process)
+        noisy_actions = self.noise_scheduler.add_noise(actions, noise, timesteps)
+
+        # Predict noise
+        noise_pred = self.noise_pred_net(noisy_actions, timesteps, global_cond=obs_cond)
+
+        # Compute L2 loss
+        loss = nn.functional.mse_loss(noise_pred, noise)
+
+        # Backpropagate and step optimizer + scheduler
+        loss.backward()
+        self.optimizer.step()
+        self.optimizer.zero_grad()
+        self.lr_scheduler.step()
+
+        # Update EMA weights
+        self.ema.step(self.noise_pred_net.parameters())
+
+        return loss.item()
 
 
-NUM_EPOCHS = 100
-BATCH_SIZE = 4
-DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
-
-# download demonstration data from Google Drive
-dataset_path = "my_data.zarr.zip"
-if not os.path.isfile(dataset_path):
-    id = "1KY1InLurpMvJDRb14L9NlXT_fEsCvVUq&confirm=t"
-    gdown.download(id=id, output=dataset_path, quiet=False)
-
-# create dataset from file
-dataset = PushTStateDataset(
-    dataset_path=dataset_path,
-    pred_horizon=PRED_HORIZON,
-    obs_horizon=OBS_HORIZON,
-    action_horizon=ACTION_HORIZON
-)
-# save training data statistics (min, max) for each dim
-stats = dataset.stats
-
-# create dataloader
-dataloader = torch.utils.data.DataLoader(
-    dataset,
-    batch_size=16,
-    num_workers=1,
-    shuffle=True,
-    # accelerate cpu-gpu transfer
-    pin_memory=True,
-    # don't kill worker process afte each epoch
-    persistent_workers=True
-)
-
-# visualize data in batch
-batch = next(iter(dataloader))
-print("batch['obs'].shape:", batch['obs'].shape)
-print("batch['action'].shape", batch['action'].shape)
-
-noise_scheduler = DDPMScheduler(
-    num_train_timesteps=NUM_DIFFUSION_ITERS,
-    # the choise of beta schedule has big impact on performance
-    # we found squared cosine works the best
-    beta_schedule='squaredcos_cap_v2',
-    # clip output to [-1,1] to improve stability
-    clip_sample=True,
-    # our network predicts noise (instead of denoised action)
-    prediction_type='epsilon'
-)
-
-noise_pred_net = ConditionalUnet1D(
-    input_dim=ACTION_DIM,
-    global_cond_dim=OBS_DIM*OBS_HORIZON,
-).to(DEVICE)        
-
-# Exponential Moving Average
-# accelerates training and improves stability
-# holds a copy of the model weights
-ema = EMAModel(
-    parameters=noise_pred_net.parameters(),
-    power=0.75)
-
-# Standard ADAM optimizer
-# Note that EMA parametesr are not optimized
-optimizer = torch.optim.AdamW(
-    params=noise_pred_net.parameters(),
-    lr=1e-4, weight_decay=1e-6)
-
-# Cosine LR schedule with linear warmup
-lr_scheduler = get_scheduler(
-    name='cosine',
-    optimizer=optimizer,
-    num_warmup_steps=500,
-    num_training_steps=len(dataloader) * NUM_EPOCHS
-)
-
-with tqdm(range(NUM_EPOCHS), desc='Epoch') as tglobal:
-    # epoch loop
-    for epoch_idx in tglobal:
-        epoch_loss = list()
-        # batch loop
-        with tqdm(dataloader, desc='Batch', leave=False) as tepoch:
-            for nbatch in tepoch:
-                # data normalized in dataset
-                # DEVICE transfer
-                nobs = nbatch['obs'].to(DEVICE)
-                naction = nbatch['action'].to(DEVICE)
-                B = nobs.shape[0]
-                # observation as FiLM conditioning
-                # (B, OBS_HORIZON, OBS_DIM)
-                obs_cond = nobs[:,:OBS_HORIZON,:]
-                # (B, OBS_HORIZON * OBS_DIM)
-                obs_cond = obs_cond.flatten(start_dim=1)
-
-                # sample noise to add to actions
-                noise = torch.randn(naction.shape, device=DEVICE)
-
-                # sample a diffusion iteration for each data point
-                timesteps = torch.randint(
-                    0, noise_scheduler.config.num_train_timesteps,
-                    (B,), device=DEVICE
-                ).long()
-
-                # add noise to the clean images according to the noise magnitude at each diffusion iteration
-                # (this is the forward diffusion process)
-                noisy_actions = noise_scheduler.add_noise(
-                    naction, noise, timesteps)
-
-                # predict the noise residual
-                noise_pred = noise_pred_net(
-                    noisy_actions, timesteps, global_cond=obs_cond)
-
-                # L2 loss
-                loss = nn.functional.mse_loss(noise_pred, noise)
-
-                # optimize
-                loss.backward()
-                optimizer.step()
-                optimizer.zero_grad()
-                # step lr scheduler every batch
-                # this is different from standard pytorch behavior
-                lr_scheduler.step()
-
-                # update Exponential Moving Average of the model weights
-                ema.step(noise_pred_net.parameters())
-
-                # logging
-                loss_cpu = loss.item()
-                epoch_loss.append(loss_cpu)
-                tepoch.set_postfix(loss=loss_cpu)
-        tglobal.set_postfix(loss=np.mean(epoch_loss))
-
-# Weights of the EMA model
-# is used for inference
-ema_noise_pred_net = noise_pred_net
-ema.copy_to(ema_noise_pred_net.parameters())
-
-
-
+if __name__ == "__main__":
+    # Example usage; replace dataset_url_id with your actual Google Drive ID (without extra query params)
+    DATASET_URL_ID = "1KY1InLurpMvJDRb14L9NlXT_fEsCvVUq"
+    trainer = DiffusionTrainer(config=hyperparameters)
+    trainer.train()
