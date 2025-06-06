@@ -21,20 +21,20 @@ hyperparameters = {
     "action_horizon": 8,
     "pred_horizon": 16,
     "num_diffusion_iters": 100,
-    "num_epochs": 1,
-    "batch_size": 256,
+    "num_epochs": 1000,
+    "batch_size": 2048,
     "lr": 1e-4,
     "weight_decay": 1e-6,
     "warmup_steps": 500,
     "ema_power": 0.75,
     "device": torch.device("cuda"),  # Will default to CUDA if available
-    "model_save_path": "ema_diffusion_model.pt",
+    "model_save_path": "pushing_model.pt",
+    "dataset_url_id": "1KY1InLurpMvJDRb14L9NlXT_fEsCvVUq",
+    "dataset_filename": "pushing_dataset.zarr.zip",
 
     # wandb
     "project_name": "diffusion_model",
     "entity": "riccardo_mengozzi",
-    "dataset_url_id": "1KY1InLurpMvJDRb14L9NlXT_fEsCvVUq",
-    "dataset_filename": "pushing_dataset.zarr.zip",
 }
 
 class DiffusionTrainer:
@@ -94,6 +94,7 @@ class DiffusionTrainer:
             pin_memory=True,
             persistent_workers=True
         )
+
 
         # Build diffusion components
         self.noise_scheduler = DDPMScheduler(

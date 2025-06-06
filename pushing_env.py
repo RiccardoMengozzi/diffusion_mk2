@@ -206,6 +206,24 @@ def sample_skeleton_particles(
 
     return skeleton_positions
 
+
+def draw_action(scene : gs.Scene, action):
+    for i, pos in enumerate(action):
+        if len(action) > 1:
+            t = i / (len(action) - 1)
+        else:
+            t = 0.0
+
+        # Define a red→blue gradient: red at t=0, blue at t=1
+        color = [1.0 - t, 0.0, t, 1.0]
+
+        pos = [pos[0], pos[1], HEIGHT_OFFSET]
+        scene.draw_debug_sphere(
+            pos=pos,
+            radius=0.005,
+            color=color
+        )
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-v", "--vis", action="store_true", default=False)
@@ -220,7 +238,7 @@ def main():
 
     ########################## init ##########################
     gs.init(backend=gs.cpu if args.cpu else gs.gpu,
-            logging_level="error",
+            logging_level="info",
             )
 
     ########################## create a scene ##########################
@@ -322,7 +340,7 @@ def main():
     )
 
     end_effector : RigidLink = franka.get_link("hand")
-    model = InferenceState("ema_diffusion_model.pt", device=gs.device)
+    model = InferenceState("pushing_model.pt", device=gs.device)
     obs_horizon = model.obs_horizon
     observation_ee = end_effector.get_pos()[:2].cpu().numpy()
     observation_dlo = sample_skeleton_particles(
@@ -380,6 +398,10 @@ def main():
             observation=obs,
         )
         print(f"predicted action: {pred_action}")
+
+        scene.clear_debug_objects()
+        draw_action(scene, pred_action)
+
         for action in pred_action:
             target_pos = np.array([action[0], action[1], HEIGHT_OFFSET + EE_OFFSET])
             qpos = franka.inverse_kinematics(
@@ -387,9 +409,14 @@ def main():
                 pos=target_pos,
                 quat=target_quat,
             )
-            
-            franka.control_dofs_position(qpos, [*motors_dof, *fingers_dof])
-            for i in range(100):
+            qpos[-2:] = 0.0
+            path = franka.plan_path(
+                qpos,
+                num_waypoints=10
+            )
+
+            for waypoint in path:
+                franka.control_dofs_position(waypoint, [*motors_dof, *fingers_dof])
                 step(
                     scene,
                     cam,

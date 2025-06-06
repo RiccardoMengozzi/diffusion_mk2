@@ -118,7 +118,7 @@ class PushTStateDataset(torch.utils.data.Dataset):
             # (N, obs_dim)
             'obs': dataset_root['data']['state'][:]
         }
-        print(train_data['obs'].shape, train_data['action'].shape)
+        
         # Marks one-past the last index for each episode
         episode_ends = dataset_root['meta']['episode_ends'][:]
         self.episode_ends = episode_ends
@@ -172,7 +172,7 @@ class PushTStateDataset(torch.utils.data.Dataset):
 if __name__ == "__main__":
     # Example usage
     dataset = PushTStateDataset(
-        dataset_path='my_data.zarr.zip',
+        dataset_path='/home/lar/Riccardo/diffusion_mk2/diffusion_mk2/dataset/pushing_dataset.zarr.zip',
         pred_horizon=1,
         obs_horizon=1,
         action_horizon=1

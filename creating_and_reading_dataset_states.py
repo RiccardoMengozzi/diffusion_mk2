@@ -5,6 +5,7 @@ import zarr
 # ------------------------------------------------------------
 # CONFIGURE THESE PATHS AS NEEDED
 # ------------------------------------------------------------
+
 project_dir   = os.path.dirname(os.path.abspath(__file__))
 npz_filename  = os.path.join(project_dir, "pushing_dataset.npz")
 zarr_filename = os.path.join(project_dir, "pushing_dataset.zarr.zip")
@@ -34,6 +35,7 @@ def create_zarr_from_npz(npz_path: str, zarr_path: str):
     observations = data["observations"]    # shape (N, O+1, 2)
     actions      = data["actions"]         # shape (N, 2)
     episode_ends  = data["episode_ends"]   # shape (E,)
+
 
     N_obs = observations.shape[0]
     N_act = actions.shape[0]
