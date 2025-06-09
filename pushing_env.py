@@ -408,11 +408,12 @@ def main():
                 link=end_effector,
                 pos=target_pos,
                 quat=target_quat,
+                rot_mask=[False,False,True],
             )
             qpos[-2:] = 0.0
             path = franka.plan_path(
                 qpos,
-                num_waypoints=10
+                num_waypoints=25
             )
 
             for waypoint in path:
@@ -425,6 +426,8 @@ def main():
                     draw_skeleton_frames=False,
                     show_real_time_factor=False,
                 )
+          
+
 
 
 if __name__ == "__main__":
