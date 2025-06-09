@@ -15,22 +15,22 @@ from diffusion_mk2.dataset.pusht_state_dataset import PushTStateDataset
 
 
 hyperparameters = {
-    "obs_dim": 32,
+    "obs_dim": 3,
     "obs_horizon": 2,
-    "action_dim": 2,
+    "action_dim": 3,
     "action_horizon": 8,
     "pred_horizon": 16,
     "num_diffusion_iters": 100,
-    "num_epochs": 1000,
-    "batch_size": 2048,
+    "num_epochs": 10,
+    "batch_size": 256,
     "lr": 1e-4,
     "weight_decay": 1e-6,
     "warmup_steps": 500,
     "ema_power": 0.75,
     "device": torch.device("cuda"),  # Will default to CUDA if available
-    "model_save_path": "pushing_model.pt",
+    "model_save_path": "circle_model.pt",
     "dataset_url_id": "1KY1InLurpMvJDRb14L9NlXT_fEsCvVUq",
-    "dataset_filename": "pushing_dataset.zarr.zip",
+    "dataset_filename": "circle_dataset.zarr.zip",
 
     # wandb
     "project_name": "diffusion_model",
