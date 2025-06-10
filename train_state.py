@@ -13,6 +13,7 @@ from diffusers.schedulers import DDPMScheduler
 from diffusion_mk2.model.diffusion.conditional_unet_1d import ConditionalUnet1D
 from diffusion_mk2.dataset.pusht_state_dataset import PushTStateDataset
 
+PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 hyperparameters = {
     "obs_dim": 3,
@@ -21,16 +22,16 @@ hyperparameters = {
     "action_horizon": 8,
     "pred_horizon": 16,
     "num_diffusion_iters": 100,
-    "num_epochs": 1000,
-    "batch_size": 2048,
+    "num_epochs": 1,
+    "batch_size": 256,
     "lr": 1e-4,
     "weight_decay": 1e-6,
     "warmup_steps": 500,
     "ema_power": 0.75,
     "device": torch.device("cuda"),  # Will default to CUDA if available
-    "model_save_path": "circle_model.pt",
+    "model_save_path": "",
     "dataset_url_id": "1KY1InLurpMvJDRb14L9NlXT_fEsCvVUq",
-    "dataset_filename": "/home/lar/Riccardo/diffusion_mk2/circle_dataset.zarr.zip",
+    "dataset_filename": os.path.join(PROJECT_DIR, "zarr_data/circle_dataset.zarr.zip"),
 
     # wandb
     "project_name": "diffusion_model",
@@ -59,7 +60,6 @@ class DiffusionTrainer:
 
         self.DEVICE = config.get("device", torch.device("cuda" if torch.cuda.is_available() else "cpu"))
         self.DATASET_FILENAME = config.get("dataset_filename", "pushing_dataset.zarr.zip")
-        self.MODEL_SAVE_PATH = config.get("model_save_path", "ema_diffusion_model.pt")
         
         #wandb
         self.project_name = config.get("project_name", "diffusion_model")
@@ -72,6 +72,10 @@ class DiffusionTrainer:
             entity=self.entity,
             mode="online"
         )
+        if config.get("model_save_path") == "":
+            # Default model save path if not specified
+            config["model_save_path"] = f"weights/{self.run.name}_model.pt"
+        self.MODEL_SAVE_PATH = os.path.join(PROJECT_DIR, config.get("model_save_path"))
 
         # Download dataset if needed
         self.dataset_path = self.DATASET_FILENAME

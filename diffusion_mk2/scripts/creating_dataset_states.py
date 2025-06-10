@@ -6,9 +6,9 @@ import zarr
 # CONFIGURE THESE PATHS AS NEEDED
 # ------------------------------------------------------------
 
-project_dir   = os.path.dirname(os.path.abspath(__file__))
-npz_filename  = os.path.join(project_dir, "circle_dataset.npz")
-zarr_filename = os.path.join(project_dir, "circle_dataset.zarr.zip")
+project_dir   = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+npz_filename  = os.path.join(project_dir, "npz_data/circle_dataset.npz")
+zarr_filename = os.path.join(project_dir, "zarr_data/circle_dataset.zarr.zip")
 # ------------------------------------------------------------
 
 def create_zarr_from_npz(npz_path: str, zarr_path: str):
