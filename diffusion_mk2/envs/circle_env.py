@@ -32,7 +32,7 @@ HEIGHT_OFFSET = TABLE_HEIGHT
 EE_OFFSET = 0.122
 EE_QUAT_ROTATION = np.array([0, 0, -1, 0])
 MODEL_PATH = "weights/circle_model.pt"
-WORKSPACE_FOLDER = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+PROJECT_FOLDER = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 
@@ -62,7 +62,7 @@ class CircleEnv:
         self.cpu = cpu
         self.show_fps = show_fps
         self.n_episodes = n_episodes
-        self.model_path = os.path.join(WORKSPACE_FOLDER, model_path)
+        self.model_path = os.path.join(PROJECT_FOLDER, model_path)
         self.verbose = verbose
 
         ########################## init ##########################
@@ -106,7 +106,7 @@ class CircleEnv:
 
         table = self.scene.add_entity(
             morph=gs.morphs.URDF(
-                file=os.path.join(WORKSPACE_FOLDER, "models/SimpleTable/SimpleTable.urdf"),
+                file=os.path.join(PROJECT_FOLDER, "models/SimpleTable/SimpleTable.urdf"),
                 pos=(0.0, 0.0, 0.0),
                 euler=(0, 0, 90),
                 scale=1,

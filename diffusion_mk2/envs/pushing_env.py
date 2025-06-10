@@ -21,7 +21,7 @@ MPM_GRID_DENSITY = 256
 SUBSTEPS = 40
 TABLE_HEIGHT = 0.7005
 HEIGHT_OFFSET = TABLE_HEIGHT
-EE_OFFSET = 0.122
+EE_OFFSET = 0.119
 EE_QUAT_ROTATION = np.array([0, 0, -1, 0])
 ROPE_LENGTH = 0.2
 ROPE_RADIUS = 0.003
@@ -69,11 +69,11 @@ class PushingEnv:
             enable_gui (bool): Enable GUI controls for the camera
         """
         self.verbose = verbose
-        self.scene = None
+        self.scene : gs.Scene = None
         self.cam = None
-        self.franka = None
-        self.rope = None
-        self.end_effector = None
+        self.franka : RigidEntity = None
+        self.rope : MPMEntity = None
+        self.end_effector : RigidLink = None
         self.model = None
         self.obs_deque = None
         
@@ -213,7 +213,8 @@ class PushingEnv:
         
         # Get the end effector link
         self.end_effector = self.franka.get_link("hand")
-        
+        self.motors_dof = np.arange(7)
+        self.fingers_dof = np.arange(7, 9)
         if self.verbose:
             print("Scene entities created and built successfully")
     
@@ -514,53 +515,169 @@ class PushingEnv:
         self.obs_deque.append(obs)
         return np.stack(self.obs_deque)
     
-    def execute_action_sequence(self, actions: NDArray) -> None:
-        """
-        Execute a sequence of actions by moving the robot.
+    def move_to_target_pose(self,
+                            target_pos: NDArray,
+                            target_quat: NDArray,
+                            path_period: float = 0.5,
+                            distance_tolerance: float = 0.005
+                            ):
+        qpos = self.franka.inverse_kinematics(
+            link=self.end_effector,
+            pos=target_pos,
+            quat=target_quat,
+        )
+        qpos[-2:] = 0.0  # Close fingers
+
+        num_waypoints = int(path_period // DT)
+        path = self.franka.plan_path(
+            qpos_goal=qpos,
+            num_waypoints=num_waypoints,
+        )
+        for p in path:
+            self.franka.control_dofs_position(
+                p,
+                [*self.motors_dof, *self.fingers_dof],
+            )
+            # Wait until the end effector reaches the target position or until a maximum number of steps is reached
+            self.step_simulation()
+            if np.linalg.norm(
+                self.end_effector.get_pos().cpu().numpy()[:2] - target_pos[:2]
+            ) < distance_tolerance:
+                break
+
+
         
+
+
+    def ee_initial_pose(self,
+                        particles: NDArray[np.float32],
+                        particle_pos: NDArray[np.float32],   
+                        max_distance: float,
+                        min_distance: float = 0.01,
+                        max_attempts: int = 1000
+                        ) -> NDArray:
+        """
+        Compute the initial end-effector pose based on a particle's position and orientation.
         Args:
-            actions (NDArray): Sequence of 2D positions to move to
+            particles (NDArray[np.float32]): Array of rope particle positions
+            particle_pos (NDArray[np.float32]): Position of the selected particle
+            particle_quat (NDArray[np.float32]): Quaternion orientation of the selected particle
+        Returns:    
+            Tuple[NDArray, NDArray]: Initial end-effector position and quaternion
         """
-        if self.verbose:
-            print(f"Executing {len(actions)} actions...")
-        
-        # Get current rope skeleton for pose computation
-        particles = self.sample_skeleton_particles(
-            self.rope.get_particles(), 
-            NUMBER_OF_PARTICLES, 
-            PARTICLES_NUMBER_FOR_POS_SMOOTHING
+        for _ in range(max_attempts):
+            # 1. Random angle and distance for XY
+            angle = np.random.uniform(0, 2 * np.pi)
+            distance = np.random.uniform(min_distance, max_distance)
+
+            # Calculate proposed XY relative to particle_pos
+            delta_x = distance * np.cos(angle)
+            delta_y = distance * np.sin(angle)
+
+            # Proposed 3D position
+            proposed_ee_pos = np.array([
+                particle_pos[0] + delta_x,
+                particle_pos[1] + delta_y,
+                HEIGHT_OFFSET + EE_OFFSET # Fixed Z
+            ])
+
+            # 2. Check clearance from all rope particles
+            is_too_close = False
+            for p in particles:
+                # Only consider XY distance for clearance check
+                dist_to_particle = np.linalg.norm(proposed_ee_pos[:2] - p[:2])
+                if dist_to_particle < min_distance:
+                    is_too_close = True
+                    break
+            
+            if not is_too_close:
+                if self.verbose:
+                    print(f"Found valid initial EE pose: {proposed_ee_pos}")
+                return proposed_ee_pos
+            
+        # If loop finishes without finding a valid pose
+        raise RuntimeError(
+            f"Could not find a suitable initial EE pose after {max_attempts} attempts."
         )
         
-        # Use middle particle for target orientation
-        idx = len(particles) // 2
-        _, target_quat = self.compute_pose_from_particle_index(particles, idx)
+
+    def get_action_target_position(self,
+                                   particles: NDArray[np.float32],
+                                   particle_index: int,
+                                   initial_ee_pos: NDArray,
+                                   min_strike_distance: float = 0.01,
+                                   max_strike_distance: float = 0.1,
+                                   ) -> NDArray:
+        """
+        Get the target position for the action based on a particle index.
         
-        motors_dof = np.arange(7)
-        fingers_dof = np.arange(7, 9)
+        Args:
+            particles (NDArray[np.float32]): Array of rope particle positions
+            particle_index (int): Index of the particle to use for target position
+            initial_ee_pos (NDArray): Initial end-effector position
+            
+        Returns:
+            NDArray: Target position for the action
+        """
+        # Get the 2D position of the target particle
+        target_particle_xy = particles[particle_index][:2]
+
+        # Calculate the vector from initial_ee_pos (XY) to the target particle (XY)
+        vector_to_target_particle = target_particle_xy - initial_ee_pos[:2]
         
-        for i, action in enumerate(actions):
-            if self.verbose:
-                print(f"Executing action {i+1}/{len(actions)}: {action}")
-            
-            target_pos = np.array([action[0], action[1], 
-                                 HEIGHT_OFFSET + EE_OFFSET])
-            
-            # Compute inverse kinematics
-            qpos = self.franka.inverse_kinematics(
-                link=self.end_effector,
-                pos=target_pos,
-                quat=target_quat,
-                rot_mask=[False, False, True],
-            )
-            qpos[-2:] = 0.0  # Keep fingers closed
-            
-            # Plan and execute path
-            path = self.franka.plan_path(qpos, num_waypoints=25)
-            
-            for waypoint in path:
-                self.franka.control_dofs_position(waypoint, [*motors_dof, *fingers_dof])
-                self.step_simulation()
-    
+        # Calculate the scalar distance from initial_ee_pos to the target particle
+        distance_to_target_particle = np.linalg.norm(vector_to_target_particle)
+
+        # Normalize the direction vector
+        # Handle case where initial_ee_pos is exactly on the particle (unlikely but possible)
+        if distance_to_target_particle < 1e-6: # Epsilon to avoid division by zero
+            action_direction_xy = np.array([0.0, 1.0]) # Default to +Y if at target
+        else:
+            action_direction_xy = vector_to_target_particle / distance_to_target_particle
+        
+        self.scene.draw_debug_arrow(
+            pos=np.array([
+                initial_ee_pos[0],
+                initial_ee_pos[1],
+                HEIGHT_OFFSET + 0.01,
+            ]),
+            vec=np.array([
+                action_direction_xy[0],
+                action_direction_xy[1],
+                0.0,  # Keep Z constant
+            ]) * 0.1,  # Scale for visibility, this was already correct for visualization
+            radius=0.005,
+            color=(0, 0, 1, 1),  # Blue color for action direction
+        )
+
+        # Determine the total scalar movement distance
+        # You want to strike through the particle, so the movement should be
+        # (distance to particle) + (some additional strike depth beyond particle)
+        strike_depth_beyond_particle = np.random.uniform(min_strike_distance, max_strike_distance)
+        total_movement_distance = distance_to_target_particle + strike_depth_beyond_particle
+
+        # Calculate the final target position
+        # Start from initial_ee_pos and move along the normalized direction
+        action_target_pos_xy = initial_ee_pos[:2] + action_direction_xy * total_movement_distance
+        
+        action_target_pos = np.array([
+            action_target_pos_xy[0],
+            action_target_pos_xy[1],
+            HEIGHT_OFFSET + EE_OFFSET + ROPE_RADIUS / 2 # Fixed Z position
+        ])
+        
+        if self.verbose:
+            print(f"Initial EE (XY): {initial_ee_pos[:2]}")
+            print(f"Target Particle (XY): {target_particle_xy}")
+            print(f"Vector to target particle (XY): {vector_to_target_particle}")
+            print(f"Distance to target particle: {distance_to_target_particle:.4f}")
+            print(f"Action Direction (XY): {action_direction_xy}")
+            print(f"Strike depth beyond particle: {strike_depth_beyond_particle:.4f}")
+            print(f"Total movement distance: {total_movement_distance:.4f}")
+            print(f"Final Action Target Pos (XY): {action_target_pos_xy}")
+        
+        return action_target_pos
+
     def run_episode(self) -> None:
         """Run a complete episode of rope manipulation."""
         if self.verbose:
@@ -568,40 +685,74 @@ class PushingEnv:
         
         # Reset environment
         self.reset_episode()
+        NUMBER_OF_ACTIONS_PER_EPISODE = 5
+        for _ in range(NUMBER_OF_ACTIONS_PER_EPISODE):
+            # Get rope skeleton and compute initial target pose
+            particles = self.sample_skeleton_particles(
+                self.rope.get_particles(), 
+                NUMBER_OF_PARTICLES, 
+                PARTICLES_NUMBER_FOR_POS_SMOOTHING
+            )
+            
+            # Move to pre-action position (middle of rope with offset)
+            idx = np.random.randint(0, len(particles) - 1)
+            particle_pos, particle_quat = self.compute_pose_from_particle_index(particles, idx)
+
+            initial_ee_pos = self.ee_initial_pose(
+                particles,
+                particle_pos,
+                max_distance=0.1,
+            )
+
+            
+            qpos = self.franka.inverse_kinematics(
+                link=self.end_effector,
+                pos=initial_ee_pos,
+                quat=particle_quat,
+            )
+            qpos[-2:] = 0.0  # Close fingers
+            self.franka.set_qpos(qpos)
+            self.scene.clear_debug_objects()
+
+            # Draw Particle Idx
+            self.scene.draw_debug_sphere(
+                pos=particle_pos - np.array([0.0, 0.0, EE_OFFSET]),
+                radius=0.005,
+                color=(1, 0, 0, 1),
+            )
+
+            self.step_simulation()
+
+            target_pos = self.get_action_target_position(particles, idx, initial_ee_pos)
+            
+            # Draw target position
+            self.scene.draw_debug_sphere(
+                pos=target_pos - np.array([0.0, 0.0, EE_OFFSET]),
+                radius=0.005,
+                color=(0, 1, 0, 1),
+            )
+
+            velocity = 0.05 # 5cm/s
+            period = np.linalg.norm(target_pos[:2] - initial_ee_pos[:2]) / velocity
+            self.move_to_target_pose(
+                target_pos=target_pos,
+                target_quat=particle_quat,
+                path_period=period,
+            )
+
         
-        # Get rope skeleton and compute initial target pose
-        particles = self.sample_skeleton_particles(
-            self.rope.get_particles(), 
-            NUMBER_OF_PARTICLES, 
-            PARTICLES_NUMBER_FOR_POS_SMOOTHING
-        )
+        # # Update observations and get model prediction
+        # obs = self.update_observation_buffer()
+        # obs = obs.reshape(self.model.obs_horizon, -1)
+        # pred_action, pred_actions = self.model.run_inference(observation=obs, verbose=False)
         
-        # Move to pre-action position (middle of rope with offset)
-        idx = len(particles) // 2
-        target_pos, target_quat = self.compute_pose_from_particle_index(particles, idx)
-        target_pos += np.array([-0.05 + np.random.uniform(low=-0.01, high=0.01), 0.0, 0.0])
+        # if self.verbose:
+        #     print(f"Model predicted action: {pred_action}")
         
-        qpos = self.franka.inverse_kinematics(
-            link=self.end_effector,
-            pos=target_pos,
-            quat=target_quat,
-        )
-        qpos[-2:] = 0.0  # Close fingers
-        self.franka.set_qpos(qpos)
-        self.step_simulation()
-        
-        # Update observations and get model prediction
-        obs = self.update_observation_buffer()
-        obs = obs.reshape(self.model.obs_horizon, -1)
-        pred_action, pred_actions = self.model.run_inference(observation=obs)
-        
-        if self.verbose:
-            print(f"Model predicted action: {pred_action}")
-        
-        # Visualize and execute actions
-        self.scene.clear_debug_objects()
-        self.draw_action_trajectory(pred_action)
-        self.execute_action_sequence(pred_action)
+        # # Visualize and execute actions
+        # self.scene.clear_debug_objects()
+        # self.draw_action_trajectory(pred_action)
+        # self.execute_action_sequence(pred_action)
     
     def run_simulation(self, n_episodes: int) -> None:
         """
