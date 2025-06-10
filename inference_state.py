@@ -102,6 +102,7 @@ class InferenceState:
             naction = noisy_action
 
             # init scheduler
+            nactions = []
             self.noise_scheduler.set_timesteps(num_diffusion_iters)
             for k in self.noise_scheduler.timesteps:
                 # predict noise
@@ -117,6 +118,7 @@ class InferenceState:
                     timestep=k,
                     sample=naction
                 ).prev_sample
+                nactions.append(naction.squeeze(0).detach().to('cpu').numpy())
 
         # unnormalize action
         naction = naction.detach().to('cpu').numpy()
@@ -134,5 +136,6 @@ class InferenceState:
         # ----------------------------
         # 6. Inspect results
         # ----------------------------
-
-        return action
+        nactions = np.array(nactions)
+        nactions = self.unnormalize_data(nactions, stats=self.dataset_stats['action'])
+        return action, nactions

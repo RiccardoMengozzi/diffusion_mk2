@@ -82,7 +82,7 @@ def draw_action(scene : gs.Scene, action):
         # Define a red→blue gradient: red at t=0, blue at t=1
         color = [1.0 - t, 0.0, t, 1.0]
 
-        pos = [pos[0], pos[1], HEIGHT_OFFSET]
+        pos = [pos[0], pos[1], pos[2] - EE_OFFSET]  # Adjust for end effector height
         scene.draw_debug_sphere(
             pos=pos,
             radius=0.005,
@@ -208,32 +208,32 @@ def main():
         franka.set_dofs_position(qpos, [*motors_dof, *fingers_dof])
         step(scene, cam, link=end_effector)
 
+        for _ in range(8):
+            obs = end_effector.get_pos().cpu().numpy()
+            obs_deque.append(obs)
+            obs = np.stack(obs_deque)
 
-        obs = end_effector.get_pos().cpu().numpy()
-        obs_deque.append(obs)
-        obs = np.stack(obs_deque)
-
-        pred_action = model.run_inference(
-            observation=obs,
-        )
-        print(f"predicted action: {pred_action}")
-
-        scene.clear_debug_objects()
-        draw_action(scene, pred_action)
-
-        for action in pred_action:
-            qpos = franka.inverse_kinematics(
-                link=end_effector,
-                pos=action,
-                quat=target_quat,
-                rot_mask=[False,False,True],
+            pred_action, pred_actions = model.run_inference(
+                observation=obs,
             )
-            qpos[-2:] = 0.0
-            franka.control_dofs_position(qpos, [*motors_dof, *fingers_dof])
-            action_steps = 0
-            while np.linalg.norm(end_effector.get_pos().cpu().numpy() - action) > 0.0075:
-                step(scene, cam, link=end_effector)
-                action_steps += 1
+
+            for a in pred_actions:
+                scene.clear_debug_objects()
+                draw_action(scene, a)
+
+            for action in pred_action:
+                qpos = franka.inverse_kinematics(
+                    link=end_effector,
+                    pos=action,
+                    quat=target_quat,
+                    rot_mask=[False,False,True],
+                )
+                qpos[-2:] = 0.0
+                franka.control_dofs_position(qpos, [*motors_dof, *fingers_dof])
+                action_steps = 0
+                while np.linalg.norm(end_effector.get_pos().cpu().numpy() - action) > 0.0075 and action_steps < int(0.2 // DT):
+                    step(scene, cam, link=end_effector)
+                    action_steps += 1
           
 
 
