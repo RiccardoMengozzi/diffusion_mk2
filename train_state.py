@@ -21,8 +21,8 @@ hyperparameters = {
     "action_horizon": 8,
     "pred_horizon": 16,
     "num_diffusion_iters": 100,
-    "num_epochs": 10,
-    "batch_size": 256,
+    "num_epochs": 1000,
+    "batch_size": 2048,
     "lr": 1e-4,
     "weight_decay": 1e-6,
     "warmup_steps": 500,
@@ -30,7 +30,7 @@ hyperparameters = {
     "device": torch.device("cuda"),  # Will default to CUDA if available
     "model_save_path": "circle_model.pt",
     "dataset_url_id": "1KY1InLurpMvJDRb14L9NlXT_fEsCvVUq",
-    "dataset_filename": "circle_dataset.zarr.zip",
+    "dataset_filename": "/home/lar/Riccardo/diffusion_mk2/circle_dataset.zarr.zip",
 
     # wandb
     "project_name": "diffusion_model",
@@ -70,12 +70,12 @@ class DiffusionTrainer:
             config=config,
             project=self.project_name,
             entity=self.entity,
-            mode="disabled"
+            mode="online"
         )
 
         # Download dataset if needed
         self.dataset_path = self.DATASET_FILENAME
-        self._ensure_dataset_downloaded()
+        #self._ensure_dataset_downloaded()
 
         # Build dataset and dataloader
         self.dataset = PushTStateDataset(
