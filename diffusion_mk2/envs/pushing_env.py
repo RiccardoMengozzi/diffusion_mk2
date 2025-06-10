@@ -1,4 +1,4 @@
-import argparse
+import argparse, os
 import numpy as np
 import genesis as gs
 from genesis.engine.entities import RigidEntity, MPMEntity
@@ -8,8 +8,27 @@ from typing import Tuple, Optional
 from scipy.spatial.transform import Rotation as R
 import time
 from tqdm import tqdm
-from diffusion_mk2.diffusion_mk2.inference.inference_state import InferenceState
+from diffusion_mk2.inference.inference_state import InferenceState
 import collections
+
+
+# Simulation constants
+PROJECT_FOLDER = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+NUMBER_OF_EPISODES = 3
+ACTION_TIME = 2.56  # seconds (for 256 batch size)
+DT = 1e-2  # simulation time step
+MPM_GRID_DENSITY = 256
+SUBSTEPS = 40
+TABLE_HEIGHT = 0.7005
+HEIGHT_OFFSET = TABLE_HEIGHT
+EE_OFFSET = 0.122
+EE_QUAT_ROTATION = np.array([0, 0, -1, 0])
+ROPE_LENGTH = 0.2
+ROPE_RADIUS = 0.003
+ROPE_BASE_POSITION = np.array([0.5, 0.0, HEIGHT_OFFSET + 0.003])
+NUMBER_OF_PARTICLES = 15
+PARTICLES_NUMBER_FOR_POS_SMOOTHING = 10
+MODEL_PATH = os.path.join(PROJECT_FOLDER, "weights/pushing_model.pt")
 
 
 class PushingEnv:
@@ -31,21 +50,7 @@ class PushingEnv:
         obs_deque (collections.deque): Rolling buffer for observations
     """
     
-    # Simulation constants
-    NUMBER_OF_EPISODES = 3
-    ACTION_TIME = 2.56  # seconds (for 256 batch size)
-    DT = 1e-2  # simulation time step
-    MPM_GRID_DENSITY = 256
-    SUBSTEPS = 40
-    TABLE_HEIGHT = 0.7005
-    HEIGHT_OFFSET = TABLE_HEIGHT
-    EE_OFFSET = 0.122
-    EE_QUAT_ROTATION = np.array([0, 0, -1, 0])
-    ROPE_LENGTH = 0.2
-    ROPE_RADIUS = 0.003
-    ROPE_BASE_POSITION = np.array([0.5, 0.0, HEIGHT_OFFSET + 0.003])
-    NUMBER_OF_PARTICLES = 15
-    PARTICLES_NUMBER_FOR_POS_SMOOTHING = 10
+
     
     def __init__(self, 
                  verbose: bool = False,
@@ -114,8 +119,8 @@ class PushingEnv:
         
         self.scene = gs.Scene(
             sim_options=gs.options.SimOptions(
-                dt=self.DT,
-                substeps=self.SUBSTEPS,
+                dt=DT,
+                substeps=SUBSTEPS,
             ),
             viewer_options=gs.options.ViewerOptions(
                 res=(1080, 720),
@@ -130,9 +135,9 @@ class PushingEnv:
                 show_world_frame=True,
             ),
             mpm_options=gs.options.MPMOptions(
-                lower_bound=(0.2, -0.3, self.HEIGHT_OFFSET - 0.05),
-                upper_bound=(0.8, 0.3, self.HEIGHT_OFFSET + 0.1),
-                grid_density=self.MPM_GRID_DENSITY,
+                lower_bound=(0.2, -0.3, HEIGHT_OFFSET - 0.05),
+                upper_bound=(0.8, 0.3, HEIGHT_OFFSET + 0.1),
+                grid_density=MPM_GRID_DENSITY,
             ),
             show_FPS=show_fps,
             show_viewer=enable_vis,
@@ -145,8 +150,8 @@ class PushingEnv:
         
         self.cam = self.scene.add_camera(
             res=(1080, 720),
-            pos=(0.5, -0.5, self.TABLE_HEIGHT + .6),
-            lookat=(0.5, 0.0, self.TABLE_HEIGHT),
+            pos=(0.5, -0.5, TABLE_HEIGHT + .6),
+            lookat=(0.5, 0.0, TABLE_HEIGHT),
             fov=50,
             GUI=enable_gui,
         )
@@ -162,7 +167,7 @@ class PushingEnv:
         # Table
         table = self.scene.add_entity(
             morph=gs.morphs.URDF(
-                file="models/SimpleTable/SimpleTable.urdf",
+                file=os.path.join(PROJECT_FOLDER, "models/SimpleTable/SimpleTable.urdf"),
                 pos=(0.0, 0.0, 0.0),
                 euler=(0, 0, 90),
                 scale=1,
@@ -181,9 +186,9 @@ class PushingEnv:
                 sampler="pbs",
             ),
             morph=gs.morphs.Cylinder(
-                height=self.ROPE_LENGTH,
-                radius=self.ROPE_RADIUS,
-                pos=self.ROPE_BASE_POSITION,
+                height=ROPE_LENGTH,
+                radius=ROPE_RADIUS,
+                pos=ROPE_BASE_POSITION,
                 euler=(90, 0, 0),
             ),
             surface=gs.surfaces.Default(roughness=2, vis_mode="particle"),
@@ -193,7 +198,7 @@ class PushingEnv:
         self.franka = self.scene.add_entity(
             gs.morphs.MJCF(
                 file="xml/franka_emika_panda/panda.xml",
-                pos=(0.0, 0.0, self.HEIGHT_OFFSET),
+                pos=(0.0, 0.0, HEIGHT_OFFSET),
             ),
             material=gs.materials.Rigid(
                 friction=2.0,
@@ -246,8 +251,8 @@ class PushingEnv:
         observation_ee = self.end_effector.get_pos()[:2].cpu().numpy()
         observation_dlo = self.sample_skeleton_particles(
             self.rope.get_particles(), 
-            self.NUMBER_OF_PARTICLES, 
-            self.PARTICLES_NUMBER_FOR_POS_SMOOTHING
+            NUMBER_OF_PARTICLES, 
+            PARTICLES_NUMBER_FOR_POS_SMOOTHING
         )[:, :2]
         obs = np.vstack([observation_ee[None, :], observation_dlo])
         self.obs_deque = collections.deque([obs] * obs_horizon, maxlen=obs_horizon)
@@ -313,9 +318,9 @@ class PushingEnv:
             Tuple[NDArray, NDArray]: Position and quaternion for the pose
         """
         particle_frames = self.compute_particle_frames(particles)
-        R_offset = gs.quat_to_R(self.EE_QUAT_ROTATION)
+        R_offset = gs.quat_to_R(EE_QUAT_ROTATION)
         quaternion = gs.R_to_quat(particle_frames[particle_index] @ R_offset)
-        pos = particles[particle_index] + np.array([0.0, 0.0, self.EE_OFFSET])
+        pos = particles[particle_index] + np.array([0.0, 0.0, EE_OFFSET])
         return pos, quaternion
     
     def draw_skeleton(self, particles: NDArray[np.float32]) -> None:
@@ -342,8 +347,8 @@ class PushingEnv:
             self.scene.draw_debug_frame(
                 T,
                 axis_length=axis_length,
-                origin_size=self.ROPE_RADIUS,
-                axis_radius=self.ROPE_RADIUS / 2
+                origin_size=ROPE_RADIUS,
+                axis_radius=ROPE_RADIUS / 2
             )
     
     def step_simulation(self, 
@@ -373,8 +378,8 @@ class PushingEnv:
         if draw_skeleton_frames:
             particles = self.sample_skeleton_particles(
                 self.rope.get_particles(), 
-                self.NUMBER_OF_PARTICLES, 
-                self.PARTICLES_NUMBER_FOR_POS_SMOOTHING
+                NUMBER_OF_PARTICLES, 
+                PARTICLES_NUMBER_FOR_POS_SMOOTHING
             )
             self.draw_skeleton(particles)
         
@@ -387,7 +392,7 @@ class PushingEnv:
         
         if show_real_time_factor:
             end_time = time.time()
-            real_time_factor = self.DT / (end_time - start_time)
+            real_time_factor = DT / (end_time - start_time)
             print(f"Real-time factor: {real_time_factor:.4f}x")
     
     @staticmethod
@@ -450,7 +455,8 @@ class PushingEnv:
             
             # Red to blue gradient
             color = [1.0 - t, 0.0, t, 1.0]
-            pos_3d = [pos[0], pos[1], self.HEIGHT_OFFSET]
+
+            pos_3d = [pos[0], pos[1], HEIGHT_OFFSET]
             
             self.scene.draw_debug_sphere(
                 pos=pos_3d,
@@ -468,7 +474,7 @@ class PushingEnv:
         self.franka.set_qpos(qpos)
         
         # Reset rope with random position
-        rope_pos = self.ROPE_BASE_POSITION + np.array([
+        rope_pos = ROPE_BASE_POSITION + np.array([
             np.random.uniform(low=-0.1, high=0.1),
             np.random.uniform(low=-0.1, high=0.1),
             0.0
@@ -491,8 +497,8 @@ class PushingEnv:
         observation_ee = self.end_effector.get_pos()[:2].cpu().numpy()
         observation_dlo = self.sample_skeleton_particles(
             self.rope.get_particles(), 
-            self.NUMBER_OF_PARTICLES, 
-            self.PARTICLES_NUMBER_FOR_POS_SMOOTHING
+            NUMBER_OF_PARTICLES, 
+            PARTICLES_NUMBER_FOR_POS_SMOOTHING
         )[:, :2]
         
         return np.vstack([observation_ee[None, :], observation_dlo])
@@ -521,8 +527,8 @@ class PushingEnv:
         # Get current rope skeleton for pose computation
         particles = self.sample_skeleton_particles(
             self.rope.get_particles(), 
-            self.NUMBER_OF_PARTICLES, 
-            self.PARTICLES_NUMBER_FOR_POS_SMOOTHING
+            NUMBER_OF_PARTICLES, 
+            PARTICLES_NUMBER_FOR_POS_SMOOTHING
         )
         
         # Use middle particle for target orientation
@@ -537,7 +543,7 @@ class PushingEnv:
                 print(f"Executing action {i+1}/{len(actions)}: {action}")
             
             target_pos = np.array([action[0], action[1], 
-                                 self.HEIGHT_OFFSET + self.EE_OFFSET])
+                                 HEIGHT_OFFSET + EE_OFFSET])
             
             # Compute inverse kinematics
             qpos = self.franka.inverse_kinematics(
@@ -566,8 +572,8 @@ class PushingEnv:
         # Get rope skeleton and compute initial target pose
         particles = self.sample_skeleton_particles(
             self.rope.get_particles(), 
-            self.NUMBER_OF_PARTICLES, 
-            self.PARTICLES_NUMBER_FOR_POS_SMOOTHING
+            NUMBER_OF_PARTICLES, 
+            PARTICLES_NUMBER_FOR_POS_SMOOTHING
         )
         
         # Move to pre-action position (middle of rope with offset)
@@ -586,7 +592,8 @@ class PushingEnv:
         
         # Update observations and get model prediction
         obs = self.update_observation_buffer()
-        pred_action = self.model.run_inference(observation=obs)
+        obs = obs.reshape(self.model.obs_horizon, -1)
+        pred_action, pred_actions = self.model.run_inference(observation=obs)
         
         if self.verbose:
             print(f"Model predicted action: {pred_action}")
@@ -629,7 +636,7 @@ def main():
     parser.add_argument("--verbose", action="store_true", default=False,
                        help="Enable verbose output")
     parser.add_argument("-n", "--n_episodes", type=int, 
-                       default=PushingEnv.NUMBER_OF_EPISODES,
+                       default=NUMBER_OF_EPISODES,
                        help="Number of episodes to run")
     args = parser.parse_args()
     
@@ -643,7 +650,7 @@ def main():
     )
     
     # Initialize the AI model
-    simulator.initialize_model("pushing_model.pt")
+    simulator.initialize_model(MODEL_PATH)
     
     # Run the simulation
     simulator.run_simulation(args.n_episodes)
