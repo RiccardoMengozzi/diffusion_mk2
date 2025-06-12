@@ -52,7 +52,7 @@ def compute_pose_from_paticle_index(
     return pos, quaternion
 
 
-def draw_skeleton(particles: NDArray[np.float32], 
+def draw_skeleton_frames(particles: NDArray[np.float32], 
                   scene: gs.Scene,
                   rope_radius: float,
                   ) -> None:
@@ -76,6 +76,28 @@ def draw_skeleton(particles: NDArray[np.float32],
             axis_length=axis_length,  # lunghezza delle frecce (adatta al tuo caso)
             origin_size=rope_radius,  # raggio della sfera in origine
             axis_radius=rope_radius / 2,  # spessore delle frecce
+        )
+
+def draw_skeleton(
+    particles: NDArray,
+    scene: gs.Scene,
+    rope_radius: float = 0.01,
+) -> None:
+    """
+    Draws a skeleton of the rope in the given scene.
+    """
+    scene.draw_debug_spheres(
+        particles,
+        radius=rope_radius,
+        color=(0.0, 1.0, 0.0, 1.0),  # Verde
+    )
+
+    for i in range(1, len(particles)):
+        scene.draw_debug_line(
+            particles[i - 1],
+            particles[i],
+            color=(0.0, 1.0, 0.0, 1.0),  # Verde
+            radius=rope_radius / 2,
         )
 
 

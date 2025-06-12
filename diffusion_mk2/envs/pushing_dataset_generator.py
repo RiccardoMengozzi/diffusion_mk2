@@ -533,7 +533,7 @@ class PushingDatasetGenerator:
         return action_target_pos, movement_distance
 
 
-    def _clean_data(self, obss, acts, number_of_data) -> Tuple[NDArray, NDArray]:
+    def _clean_data(self, obss, acts) -> Tuple[NDArray, NDArray]:
         obss_indices = dlo_utils.downsample_array(obss, self.action_length)
         acts_indices = dlo_utils.downsample_array(acts, self.action_length)
         cleaned_obss = obss[obss_indices]
@@ -599,7 +599,7 @@ class PushingDatasetGenerator:
                 # 6. clean the observations and actions:
                 #   - remove data where ee_init and ee_final are very close
                 #   - sample them depending on the number of data per action
-                clean_obss, clean_acts = self._clean_data(obss, acts, self.action_length)
+                clean_obss, clean_acts = self._clean_data(obss, acts)
 
                 # 7. save 
                 observations.append(clean_obss)
@@ -625,30 +625,30 @@ class PushingDatasetGenerator:
         print(f"Saved dataset with {len(observations)} observations and actions.")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("-v", "--vis", action="store_true", default=False)
-    parser.add_argument("-g", "--gui", action="store_true", default=False)
-    parser.add_argument("-c", "--cpu", action="store_true", default=False)
-    parser.add_argument("-f", "--show_fps", action="store_true", default=False)
-    parser.add_argument(
-        "-e",
-        "--n_episodes",
-        type=int,
-        default=NUMBER_OF_EPISODES,
-        help="Number of episodes to run. Default is 3.",
-    )
-    parser.add_argument("-a", "--n_actions", type=int, default=10)
-    parser.add_argument("-l", "--action_length", type=int, default=10,)
-    args = parser.parse_args()
+        parser = argparse.ArgumentParser()
+        parser.add_argument("-v", "--vis", action="store_true", default=False)
+        parser.add_argument("-g", "--gui", action="store_true", default=False)
+        parser.add_argument("-c", "--cpu", action="store_true", default=False)
+        parser.add_argument("-f", "--show_fps", action="store_true", default=False)
+        parser.add_argument(
+            "-e",
+            "--n_episodes",
+            type=int,
+            default=NUMBER_OF_EPISODES,
+            help="Number of episodes to run. Default is 3.",
+        )
+        parser.add_argument("-a", "--n_actions", type=int, default=10)
+        parser.add_argument("-l", "--action_length", type=int, default=10,)
+        args = parser.parse_args()
 
-    ########################## init ##########################
-    pushing_dataset_generator = PushingDatasetGenerator(
-        cpu=args.cpu,
-        gui=args.gui,
-        vis=args.vis,
-        show_fps=args.show_fps,
-        n_episodes=args.n_episodes,
-        n_actions=args.n_actions,
-        action_length=args.action_length,
-    )
-    pushing_dataset_generator.run()
+        ########################## init ##########################
+        pushing_dataset_generator = PushingDatasetGenerator(
+            cpu=args.cpu,
+            gui=args.gui,
+            vis=args.vis,
+            show_fps=args.show_fps,
+            n_episodes=args.n_episodes,
+            n_actions=args.n_actions,
+            action_length=args.action_length,
+        )
+        pushing_dataset_generator.run()
