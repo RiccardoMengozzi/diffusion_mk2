@@ -723,6 +723,11 @@ class PushingEnv:
 
             self.step_simulation()
 
+            ################## save intial ee and DLO state ##################
+
+
+
+
             target_pos = self.get_action_target_position(particles, idx, initial_ee_pos)
             
             # Draw target position
@@ -732,6 +737,7 @@ class PushingEnv:
                 color=(0, 1, 0, 1),
             )
 
+
             velocity = 0.05 # 5cm/s
             period = np.linalg.norm(target_pos[:2] - initial_ee_pos[:2]) / velocity
             self.move_to_target_pose(
@@ -740,7 +746,12 @@ class PushingEnv:
                 path_period=period,
             )
 
-        
+            ################### save final DLO state as target ###################
+
+            ################### save final ee state as action  ###################
+
+
+
         # # Update observations and get model prediction
         # obs = self.update_observation_buffer()
         # obs = obs.reshape(self.model.obs_horizon, -1)

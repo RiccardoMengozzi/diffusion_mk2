@@ -7,8 +7,8 @@ import zarr
 # ------------------------------------------------------------
 
 project_dir   = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-npz_filename  = os.path.join(project_dir, "npz_data/circle_dataset.npz")
-zarr_filename = os.path.join(project_dir, "zarr_data/circle_dataset.zarr.zip")
+npz_filename  = os.path.join(project_dir, "npz_data/test.npz")
+zarr_filename = os.path.join(project_dir, "zarr_data/test.zarr.zip")
 # ------------------------------------------------------------
 
 def create_zarr_from_npz(npz_path: str, zarr_path: str):
@@ -25,7 +25,6 @@ def create_zarr_from_npz(npz_path: str, zarr_path: str):
     """
     # 1) Load arrays from .npz
     data = np.load(npz_path)
-    print(data)
     if "observations" not in data or "actions" not in data or "episode_ends" not in data:
         raise KeyError(
             "The .npz must contain exactly these three keys: "

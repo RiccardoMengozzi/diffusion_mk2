@@ -16,14 +16,14 @@ from diffusion_mk2.dataset.pusht_state_dataset import PushTStateDataset
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 hyperparameters = {
-    "obs_dim": 3,
+    "obs_dim": 62,
     "obs_horizon": 2,
-    "action_dim": 3,
+    "action_dim": 2,
     "action_horizon": 8,
     "pred_horizon": 16,
     "num_diffusion_iters": 100,
-    "num_epochs": 1,
-    "batch_size": 256,
+    "num_epochs": 10,
+    "batch_size": 32,
     "lr": 1e-4,
     "weight_decay": 1e-6,
     "warmup_steps": 500,
@@ -31,7 +31,7 @@ hyperparameters = {
     "device": torch.device("cuda"),  # Will default to CUDA if available
     "model_save_path": "",
     "dataset_url_id": "1KY1InLurpMvJDRb14L9NlXT_fEsCvVUq",
-    "dataset_filename": os.path.join(PROJECT_DIR, "zarr_data/circle_dataset.zarr.zip"),
+    "dataset_filename": os.path.join(PROJECT_DIR, "zarr_data/test.zarr.zip"),
 
     # wandb
     "project_name": "diffusion_model",
@@ -89,6 +89,8 @@ class DiffusionTrainer:
             action_horizon=self.ACTION_HORIZON
         )
         self.stats = self.dataset.stats
+
+        print(f"LENGTH OF DATASET: {len(self.dataset)}")
 
         self.dataloader = torch.utils.data.DataLoader(
             self.dataset,

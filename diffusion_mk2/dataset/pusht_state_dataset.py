@@ -172,15 +172,14 @@ class PushTStateDataset(torch.utils.data.Dataset):
 if __name__ == "__main__":
     # Example usage
     dataset = PushTStateDataset(
-        dataset_path='/home/lar/Riccardo/diffusion_mk2/diffusion_mk2/dataset/pushing_dataset.zarr.zip',
-        pred_horizon=1,
-        obs_horizon=1,
-        action_horizon=1
+        dataset_path="/home/mengo/Research/LLM_DOM/diffusion_mk2/zarr_data/test.zarr.zip",
+        pred_horizon=16,
+        obs_horizon=2,
+        action_horizon=8
     )
     
     print("Dataset length:", len(dataset))
     sample = dataset[3]
-    print(sample)
     print("episode ends:", dataset.episode_ends)
     # print("Sample keys:", sample.keys())
     # print("Sample obs shape:", sample['obs'].shape)
