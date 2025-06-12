@@ -7,8 +7,8 @@ import zarr
 # ------------------------------------------------------------
 
 project_dir   = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-npz_filename  = os.path.join(project_dir, "npz_data/test.npz")
-zarr_filename = os.path.join(project_dir, "zarr_data/test.zarr.zip")
+npz_filename  = os.path.join(project_dir, "npz_data/pushing_dataset.npz")
+zarr_filename = os.path.join(project_dir, "zarr_data/pushing_dataset.zarr.zip")
 # ------------------------------------------------------------
 
 def create_zarr_from_npz(npz_path: str, zarr_path: str):

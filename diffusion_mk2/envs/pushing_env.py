@@ -67,7 +67,7 @@ PARTICLES_NUMBER_FOR_POS_SMOOTHING = 10
 MODEL_PATH = os.path.join(PROJECT_FOLDER, "weights/dummy-j6akzdd4_model.pt")
 
 
-class PushingDatasetGenerator:
+class PushingEnv:
     def __init__(
         self,
         cpu: bool = False,
@@ -442,7 +442,7 @@ if __name__ == "__main__":
         args = parser.parse_args()
 
         ########################## init ##########################
-        pushing_dataset_generator = PushingDatasetGenerator(
+        pushing_dataset_generator = PushingEnv(
             cpu=args.cpu,
             gui=args.gui,
             vis=args.vis,

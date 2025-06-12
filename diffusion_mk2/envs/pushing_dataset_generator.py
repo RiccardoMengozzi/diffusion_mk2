@@ -52,6 +52,7 @@ class PushingDatasetGenerator:
         n_episodes: int = 3,
         n_actions: int = 10,
         action_length: int = 10,
+        save_name: str =  "dummy.npz",
     ):
 
         self.cpu = cpu
@@ -62,9 +63,7 @@ class PushingDatasetGenerator:
         self.n_actions = n_actions
         self.action_length = action_length
 
-        self.npz_save_path = os.path.join(
-            PROJECT_FOLDER, "npz_data", "test.npz")
-
+        self.npz_save_path = os.path.join(PROJECT_FOLDER, "npz_data", save_name)
         gs.init(
             backend=gs.cpu if self.cpu else gs.gpu,
             logging_level="error",
@@ -639,6 +638,12 @@ if __name__ == "__main__":
         )
         parser.add_argument("-a", "--n_actions", type=int, default=10)
         parser.add_argument("-l", "--action_length", type=int, default=10,)
+        parser.add_argument(
+            "-n",
+            "--save_name",
+            type=str,
+            default="dummy.npz",
+        )
         args = parser.parse_args()
 
         ########################## init ##########################
@@ -650,5 +655,6 @@ if __name__ == "__main__":
             n_episodes=args.n_episodes,
             n_actions=args.n_actions,
             action_length=args.action_length,
+            save_name=args.save_name,
         )
         pushing_dataset_generator.run()
