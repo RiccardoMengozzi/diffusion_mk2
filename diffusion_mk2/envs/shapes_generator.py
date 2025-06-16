@@ -17,7 +17,7 @@ MPM_GRID_DENSITY = 256
 SUBSTEPS = 40
 TABLE_HEIGHT = 0.7005
 HEIGHT_OFFSET = TABLE_HEIGHT
-EE_OFFSET = 0.119
+EE_OFFSET = 0.118
 EE_QUAT_ROTATION = np.array([0, 0, -1, 0])
 ROPE_LENGTH = 0.2
 ROPE_RADIUS = 0.003
@@ -198,6 +198,86 @@ class ShapesGenerator:
             average_number=PARTICLES_NUMBER_FOR_POS_SMOOTHING,
             ))
         
+    def make_S_shape(self):
+        ##### FIRST ACTION #####
+        target_pos, target_quat = dlo_utils.compute_pose_from_paticle_index(
+            self.rope.get_particles(),
+            particle_index=self.rope.get_particles().shape[0] // 4,
+            ee_quat_offset=EE_QUAT_ROTATION,
+            ee_offset=EE_OFFSET,
+        )
+        target_pos += np.array([-0.05, 0.0, 0.0])
+        qpos = self.franka.inverse_kinematics(
+            link=self.end_effector,
+            pos=target_pos,
+            quat=EE_QUAT_ROTATION,
+        )
+        qpos[-2:] = 0.0
+        self.franka.set_qpos(qpos)
+        self.scene.step()
+
+        target_pos[0] += 0.1
+        qpos = self.franka.inverse_kinematics(
+            link=self.end_effector,
+            pos=target_pos,
+            quat=EE_QUAT_ROTATION,
+        )
+        qpos[-2:] = 0.0
+
+        path = self.franka.plan_path(
+            qpos_goal=qpos,
+            num_waypoints=int(2.0 // DT),
+        )
+
+        for p in path:
+            self.franka.control_dofs_position(p)
+            self.scene.step()   
+            if np.linalg.norm(self.end_effector.get_pos().cpu().numpy()[:2] - target_pos[:2]) < 0.01:  
+                break
+
+        #### SECOND ACTION ####
+        target_pos, target_quat = dlo_utils.compute_pose_from_paticle_index(
+            self.rope.get_particles(),
+            particle_index=self.rope.get_particles().shape[0] - 4,
+            ee_quat_offset=EE_QUAT_ROTATION,
+            ee_offset=EE_OFFSET,
+        )
+        target_pos += np.array([-0.05, 0.0, 0.0])
+        qpos = self.franka.inverse_kinematics(
+            link=self.end_effector,
+            pos=target_pos,
+            quat=EE_QUAT_ROTATION,
+        )
+        qpos[-2:] = 0.0
+        self.franka.set_qpos(qpos)
+        self.scene.step()
+
+        target_pos[0] += 0.1
+        qpos = self.franka.inverse_kinematics(
+            link=self.end_effector,
+            pos=target_pos,
+            quat=EE_QUAT_ROTATION,
+        )
+        qpos[-2:] = 0.0
+
+        path = self.franka.plan_path(
+            qpos_goal=qpos,
+            num_waypoints=int(2.0 // DT),
+        )
+
+        for p in path:
+            self.franka.control_dofs_position(p)
+            self.scene.step()   
+            if np.linalg.norm(self.end_effector.get_pos().cpu().numpy()[:2] - target_pos[:2]) < 0.01:  
+                break
+
+
+        print("S-shape state = ", dlo_utils.get_skeleton(
+            self.rope.get_particles(),
+            downsample_number=NUMBER_OF_PARTICLES,
+            average_number=PARTICLES_NUMBER_FOR_POS_SMOOTHING,
+            ))
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("-v", "--vis", action="store_true", default=False)
@@ -209,4 +289,4 @@ if __name__ == "__main__":
 
     generator = ShapesGenerator(vis=args.vis, gui=args.gui, cpu=args.cpu, show_fps=args.show_fps)
     generator.reset()
-    generator.make_U_shape()
+    generator.make_S_shape()

@@ -27,7 +27,7 @@ np.set_printoptions(
 
 
 
-DLO_TARGET = [
+U_SHAPE = [
     [0.5227354,   0.05167644,  0.70309025],
     [0.53375965,  0.04684567,  0.7036251 ],
     [0.54692805,  0.04094509,  0.70339483],
@@ -45,6 +45,27 @@ DLO_TARGET = [
     [0.5272029,  -0.05254408,  0.70393485],
 ]
 
+
+S_SHAPE = [
+    [0.5377967, 0.09156673, 0.7030923],
+    [0.5439045, 0.08120491, 0.70362353],
+    [0.5504331, 0.06836569, 0.70339876],
+    [0.55315757, 0.05467806, 0.70354724],
+    [0.5524119, 0.04051597, 0.70366806],
+    [0.5469545, 0.02725626, 0.70344853],
+    [0.53848577, 0.0161415, 0.7036243],
+    [0.52962106, 0.00416939, 0.70345014],
+    [0.523419, -0.00827662, 0.7036226],
+    [0.52062184, -0.02235672, 0.7033995],
+    [0.5222439, -0.03617706, 0.70355],
+    [0.5278671, -0.04916142, 0.7036753],
+    [0.53676504, -0.0603309, 0.70344836],
+    [0.5465635, -0.07019525, 0.70360297],
+    [0.5551817, -0.07935598, 0.7039492]
+]
+
+
+DLO_TARGET = S_SHAPE
 
 
 PROJECT_FOLDER = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -64,7 +85,7 @@ ROPE_RADIUS = 0.003
 ROPE_BASE_POSITION = np.array([0.5, 0.0, HEIGHT_OFFSET + ROPE_RADIUS])
 NUMBER_OF_PARTICLES = 15
 PARTICLES_NUMBER_FOR_POS_SMOOTHING = 10
-MODEL_PATH = os.path.join(PROJECT_FOLDER, "weights/dummy-j6akzdd4_model.pt")
+MODEL_PATH = os.path.join(PROJECT_FOLDER, "weights/summer-butterfly-25_model.pt")
 
 
 class PushingEnv:
@@ -222,9 +243,7 @@ class PushingEnv:
             0.0
         ])
         self.rope.set_position(rope_pos)
-        
 
-        # Step to initialize positions
         self._step()
 
 
@@ -393,6 +412,38 @@ class PushingEnv:
                     rope_radius=ROPE_RADIUS,
                 )
 
+
+                rope_skeleton = dlo_utils.get_skeleton(self.rope.get_particles(),
+                                                                downsample_number=NUMBER_OF_PARTICLES,
+                                                                average_number=PARTICLES_NUMBER_FOR_POS_SMOOTHING)
+
+                # 2. Choose a random index
+                idx = np.random.randint(0, len(rope_skeleton) - 1)  
+
+                # 3. given the idx, choose a rondom starting ee poisition, and get the proper ee orientation
+                _, ee_quat = dlo_utils.compute_pose_from_paticle_index(
+                    rope_skeleton, idx, EE_QUAT_ROTATION, EE_OFFSET
+                )
+                print("EEEEEEEEEEEEE QUATTTTTTTTTTTTTTTTTTT", ee_quat)
+                ee_pos = self._get_random_ee_position(
+                    particles=self.rope.get_particles(),
+                    idx=idx,
+                    max_distance=0.05,
+                    min_distance=0.01,
+                )
+
+                # 4. set the ee pose
+                qpos = self.franka.inverse_kinematics(
+                    link=self.end_effector,
+                    pos=ee_pos,
+                    quat=ee_quat,
+                    # rot_mask=[True, True, False],
+                )
+                qpos[-2:] = 0.0  # set fingers to 0
+                self.franka.set_qpos(qpos=qpos)
+                # Step to initialize positions
+
+
                 ### get_observation ###
                 obs_ee = self.end_effector.get_pos().cpu().numpy()[:2]
                 obs_dlo = dlo_utils.get_skeleton(self.rope.get_particles(), 
@@ -415,17 +466,18 @@ class PushingEnv:
                 # Loop through each waypoint in the predicted action
                 self.draw_action_trajectory(pred_action)
                 for action in pred_action:
+                    target_pos = np.array([action[0], action[1], HEIGHT_OFFSET + EE_OFFSET])
                     qpos = self.franka.inverse_kinematics(
                         link=self.end_effector,
-                        pos=action,
-                        quat=EE_QUAT_ROTATION,
-                        rot_mask=[False, False, True],
+                        pos=target_pos,
+                        quat=ee_quat,
+                        rot_mask=[True, True, True],
                     )
                     qpos[-2:] = 0.0
                     self.franka.control_dofs_position(qpos, [*self.motors_dof, *self.fingers_dof])
                     action_steps = 0
                     # Wait until the end effector reaches the target position or until a maximum number of steps is reached
-                    while np.linalg.norm(self.end_effector.get_pos().cpu().numpy()[:2] - action) > 0.0075 and action_steps < int(0.2 // DT):
+                    while np.linalg.norm(self.end_effector.get_pos().cpu().numpy()[:2] - target_pos[:2]) > 0.0075:
                         self.scene.step()  # Fixed method call
                         action_steps += 1
 
@@ -447,7 +499,7 @@ if __name__ == "__main__":
             gui=args.gui,
             vis=args.vis,
             show_fps=args.show_fps,
-            n_episodes=NUMBER_OF_EPISODES,
-            n_actions=NUMBER_OF_ACTIONS_PER_EPISODE,
+            n_episodes=args.n_episodes,
+            n_actions=args.n_actions,
         )
         pushing_dataset_generator.run()
