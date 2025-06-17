@@ -1,14 +1,16 @@
 import os
 import numpy as np
 import zarr
+import json
 
 # ------------------------------------------------------------
 # CONFIGURE THESE PATHS AS NEEDED
 # ------------------------------------------------------------
 
 project_dir   = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-npz_filename  = os.path.join(project_dir, "npz_data/pushing_dataset.npz")
-zarr_filename = os.path.join(project_dir, "zarr_data/pushing_dataset.zarr.zip")
+# npz_filename  = os.path.join(project_dir, "npz_data", "teleop_pushing_dataset.npz")
+filename  = os.path.join(project_dir, "json_data", "dummy.jsonl")
+zarr_filename = os.path.join(project_dir, "zarr_data/teleop_pushing_dataset.zarr.zip")
 # ------------------------------------------------------------
 
 def create_zarr_from_npz(npz_path: str, zarr_path: str):
@@ -23,19 +25,57 @@ def create_zarr_from_npz(npz_path: str, zarr_path: str):
       └── meta/
            └── episode_ends   (shape: [E],            dtype=int64)
     """
-    # 1) Load arrays from .npz
-    data = np.load(npz_path)
-    if "observations" not in data or "actions" not in data or "episode_ends" not in data:
-        raise KeyError(
-            "The .npz must contain exactly these three keys: "
-            "'observations', 'actions', and 'episode_ends'."
-        )
+    # 1) Load arrays from .npz or .jsonl
+    observations = []
+    actions      = []
+    episode_ends = []
 
-    observations = data["observations"]    # shape (N, O+1, 2)
-    actions      = data["actions"]         # shape (N, 2)
-    episode_ends  = data["episode_ends"]   # shape (E,)
+    #### NPZ #####
+    if filename.endswith(".npz"):
+        
+        data = np.load(npz_path)
+        if "observations" not in data or "actions" not in data or "episode_ends" not in data:
+            raise KeyError(
+                "The .npz must contain exactly these three keys: "
+                "'observations', 'actions', and 'episode_ends'."
+            )
 
+        observations = data["observations"]    # shape (N, O+1, 2)
+        actions      = data["actions"]         # shape (N, 2)
+        episode_ends  = data["episode_ends"]   # shape (E,)
 
+    #### JSONL ####
+    elif filename.endswith(".jsonl"):
+        with open(filename, 'r') as f:
+            for line in f:
+                try:
+                    data = json.loads(line.strip())
+                    
+                    if data.get("type") == "data":
+                        # Extract observation and action
+                        obs = data["observation"]
+                        act = data["action"]
+                        
+                        observations.append(obs)
+                        actions.append(act)
+                        
+                    elif data.get("type") == "episode_end":
+                        # Mark the end of current episode
+                        episode_end = data["episode_idx"]
+                        episode_ends.append(episode_end)  # Index of last step in episode
+                        
+                except json.JSONDecodeError as e:
+                    print(f"Warning: Skipping invalid JSON line: {e}")
+                    continue
+
+        if not observations:
+            raise ValueError("No valid observation/action pairs found in JSON file")
+
+        observations = np.array(observations, dtype=np.float32)
+        actions = np.array(actions, dtype=np.float32)
+        episode_ends = np.array(episode_ends, dtype=np.int64)
+
+    #### CREATE ZARR ####
     N_obs = observations.shape[0]
     N_act = actions.shape[0]
     if N_obs != N_act:
@@ -108,4 +148,4 @@ def create_zarr_from_npz(npz_path: str, zarr_path: str):
 
 if __name__ == "__main__":
     print("==> Reading pushing_dataset.npz and writing to Zarr‐Zip …")
-    create_zarr_from_npz(npz_path=npz_filename, zarr_path=zarr_filename)
+    create_zarr_from_npz(npz_path=filename, zarr_path=zarr_filename)

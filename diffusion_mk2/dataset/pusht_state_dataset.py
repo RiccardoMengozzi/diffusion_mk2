@@ -172,7 +172,7 @@ class PushTStateDataset(torch.utils.data.Dataset):
 if __name__ == "__main__":
     # Example usage
     dataset = PushTStateDataset(
-        dataset_path="/home/mengo/Research/LLM_DOM/diffusion_mk2/zarr_data/test.zarr.zip",
+        dataset_path="/home/mengo/Research/LLM_DOM/diffusion_mk2/zarr_data/teleop_pushing_dataset.zarr.zip",
         pred_horizon=16,
         obs_horizon=2,
         action_horizon=8
