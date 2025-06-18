@@ -48,7 +48,8 @@ class JSONLDataLogger:
     
     def __init__(self, save_path, save_name):
         self.save_dir = save_path
-        self.filename = os.path.join(self.save_dir, save_name)
+        self.save_name = save_name
+        self.filename = os.path.join(self.save_dir, self.save_name)
 
         # If folder does not exist, create it
         if not os.path.exists(self.save_dir):
@@ -64,7 +65,7 @@ class JSONLDataLogger:
                         last_episode_idx = data.get("episode_idx", last_episode_idx)
 
         self.total_steps = last_episode_idx       
-        self.episode_steps = 0 
+        self.episode_data = []
         self.file = None
         
     def initialize_file(self):
@@ -80,30 +81,37 @@ class JSONLDataLogger:
             "observation": observation.tolist(),  # Convert numpy array to list
             "action": action.tolist()
         }
-        
-        self.file.write(json.dumps(data) + '\n')
-        self.file.flush()  # Ensure data is written immediately
-        self.total_steps += 1
-        self.episode_steps += 1
-    
-    def end_episode(self):
-        """Mark the end of an episode"""
+        self.episode_data.append(data)
+
+    def delete_episode_data(self):
+        self.episode_data = []  # Clear the episode data after saving
+
+
+    def save_episode(self):
+        """Mark the end of an episode and save all data"""
+
+        # Save episode data
+        for data in self.episode_data:
+            self.file.write(json.dumps(data) + '\n')
+            self.total_steps += 1
+
+        # Save episode end idx
         episode_end = {
             "type": "episode_end",
             "episode_idx": self.total_steps,
         }
         self.file.write(json.dumps(episode_end) + '\n')
         self.file.flush()
-        self.episode_steps = 0  
+        self.delete_episode_data()  # Clear the episode data after saving
 
-    def reset(self):
-        self.total_steps -= self.episode_steps
+
+
     
     def close(self):
         """Close the file"""
         if self.file:
             self.file.close()
-            print(f"Closed JSONL file with {self.total_steps} total steps")
+            print(f"Closed JSONL file '{self.save_name}.jsonl' with {self.total_steps} total steps")
 
 
 
@@ -165,8 +173,11 @@ class Monitor():
                         total_episodes, 
                         current_step, 
                         current_key_pressed, 
-                        end_effector: RigidLink):
+                        end_effector: RigidLink,
+                        real_time_factor: float):
         info_text = Text()
+        info_text.append("Real-time factor: ", style="none")
+        info_text.append(f"{real_time_factor:.3f}x\n", style="bold cyan")
         info_text.append("Current Episode: ", style="none")
         info_text.append(f"{current_episode}/{total_episodes}\n", style="bold cyan")
         info_text.append("Current Step in Episode: ", style="none")
@@ -238,6 +249,7 @@ class TeleopPushDataGenerator():
         self.current_key_pressed = "None"
         self.current_episode = 0
         self.total_episodes = 0
+        self.real_time_factor = 0.0
 
 
         # Add flag for Enter key detection
@@ -281,14 +293,14 @@ class TeleopPushDataGenerator():
             res=(900, 1080),
             pos=(1.0, 0.0, TABLE_HEIGHT + 0.1),
             lookat=(0.5, 0.0, TABLE_HEIGHT),
-            fov=50,
+            fov=70,
             GUI=self.gui,
         )
         self.cam_side = self.scene.add_camera(
             res=(900, 1080),
             pos=(0.5, -1.0, TABLE_HEIGHT + 0.1),
             lookat=(0.5, 0.0, TABLE_HEIGHT),
-            fov=50,
+            fov=70,
             GUI=self.gui,
         )
 
@@ -378,9 +390,14 @@ class TeleopPushDataGenerator():
 
 
     def _step(self):
+        start_time = time.time()
+
         self.scene.step()
         self.cam_front.render()
         self.cam_side.render()
+
+        end_time = time.time()
+        self.real_time_factor = DT / (end_time - start_time)
 
 
     def setup_keyboard_listener(self):
@@ -503,8 +520,6 @@ class TeleopPushDataGenerator():
         # Save current position as previous position
         self.previous_ee_position = np.array([pose[0], pose[1]])
 
-        # Reset step counter
-        self.data_logger.reset()
 
 
 
@@ -528,7 +543,7 @@ class TeleopPushDataGenerator():
         self._step()
 
 
-    def save_observation(self):
+    def get_observation(self):
         obs_ee = self.end_effector.get_pos().cpu().numpy()[:2]
         # self.scene.draw_debug_sphere(
         #     pos=np.array([obs_ee[0], obs_ee[1], HEIGHT_OFFSET + ROPE_RADIUS/2]),
@@ -541,7 +556,7 @@ class TeleopPushDataGenerator():
         obs_target = self.target_shape[:, :2]
         return np.vstack([obs_ee, obs_dlo, obs_target])
 
-    def save_action(self):
+    def get_action(self):
         action = self.end_effector.get_pos().cpu().numpy()[:2]
         return action
 
@@ -564,12 +579,16 @@ class TeleopPushDataGenerator():
             if self.esc_pressed:
                 # Stop the listener and exit
                 self.listener.stop()
-                return current_step
+                break
             
             if self.backspace_pressed:
                 resetting = True
                 # Reset the robot to initial pose after skipping (will show its own reset status)
                 self.reset(self.initial_pose)
+                # Clear the episode data for this skipped episode
+                self.data_logger.delete_episode_data()  
+                # Reset the step counter
+                current_step = 0
 
 
 
@@ -578,12 +597,12 @@ class TeleopPushDataGenerator():
 
             if loop_counter % SAVE_DATA_INTERVAL == 0 and is_moving:
                 current_step += 1
-                observation = self.save_observation()
+                observation = self.get_observation()
 
             self.move()
 
             if loop_counter % SAVE_DATA_INTERVAL == 0 and is_moving:
-                action = self.save_action()
+                action = self.get_action()
                 self.data_logger.append_data(observation, action)
 
             # Update Rich layout
@@ -600,7 +619,8 @@ class TeleopPushDataGenerator():
                                                                 self.total_episodes,
                                                                 current_step,
                                                                 self.current_key_pressed,
-                                                                self.end_effector))
+                                                                self.end_effector,
+                                                                self.real_time_factor))
             layout["footer"].update(self.monitor.make_footer_panel())
             
             self.live.update(layout)
@@ -631,11 +651,12 @@ class TeleopPushDataGenerator():
                     self.run_episode(i, n_episodes)
                     
                     if self.esc_pressed:
-                        # Exit if ESC is pressed
+                        # Exit if ESC is pressed without saving episode
                         print("Esc pressed, exiting...")
                         break
-
-                    self.data_logger.end_episode()
+                    
+                    # Save all episode data
+                    self.data_logger.save_episode()
 
 
             finally:
