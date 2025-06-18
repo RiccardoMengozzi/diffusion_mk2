@@ -3,24 +3,20 @@ import argparse
 import numpy as np
 import genesis as gs
 import time
-import json
 from pynput import keyboard
 from genesis.engine.entities import RigidEntity, MPMEntity
 from genesis.engine.entities.rigid_entity import RigidLink
 from diffusion_mk2.utils.dlo_shapes import U_SHAPE, S_SHAPE
 import diffusion_mk2.utils.dlo_computations as dlo_utils
+from diffusion_mk2.envs.teleop.data_logger import JSONLDataLogger
+from diffusion_mk2.envs.teleop.monitor import Monitor
 
-from rich.console import Console
 from rich.live import Live
-from rich.text import Text
-from rich.panel import Panel
-from rich.layout import Layout
-from rich.align import Align
-from rich.box import ROUNDED
-from rich.prompt import Prompt
 
 
-PROJECT_FOLDER = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+PROJECT_FOLDER = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 NUMBER_OF_EPISODES = 3
 NUMBER_OF_ACTIONS_PER_EPISODE = 8 # This is not directly used in the teleop script, but kept for consistency
 ACTION_TIME = 2.0  # seconds (for 256 batch size)
@@ -30,7 +26,8 @@ MPM_GRID_DENSITY = 256
 SUBSTEPS = 40
 TABLE_HEIGHT = 0.7005
 HEIGHT_OFFSET = TABLE_HEIGHT
-EE_OFFSET = 0.116
+EE_OFFSET = 0.111
+EE_Z = 0.04
 EE_QUAT_ROTATION = np.array([0, 0, -1, 0])
 ROPE_LENGTH = 0.2
 ROPE_RADIUS = 0.003
@@ -41,198 +38,15 @@ PARTICLES_NUMBER_FOR_POS_SMOOTHING = 10
 
 EE_VELOCITY = 0.015
 SAVE_DATA_INTERVAL = 3 # every 3 steps
+CLOSE_GRIPPER_POSITION = 0.0   
+OPEN_GRIPPER_POSITION = 0.01  
 
-
-class JSONLDataLogger:
-    """Handles JSONL file operations for streaming data"""
-    
-    def __init__(self, save_path, save_name):
-        self.save_dir = save_path
-        self.save_name = save_name
-        self.filename = os.path.join(self.save_dir, self.save_name)
-
-        # If folder does not exist, create it
-        if not os.path.exists(self.save_dir):
-            os.makedirs(self.save_dir, exist_ok=True)
-
-        # If the file already exist, append data to it
-        last_episode_idx = 0
-        if os.path.exists(self.filename):
-            with open(self.filename, "r") as f:
-                for line in f:
-                    data = json.loads(line)
-                    if data.get("type") == "episode_end":
-                        last_episode_idx = data.get("episode_idx", last_episode_idx)
-
-        self.total_steps = last_episode_idx       
-        self.episode_data = []
-        self.file = None
-        
-    def initialize_file(self):
-        """Initialize JSONL file"""
-        self.file = open(self.filename, 'a')
-        
-    
-    
-    def append_data(self, observation, action):
-        """Append observation and action to file"""
-        data = {
-            "type": "data",
-            "observation": observation.tolist(),  # Convert numpy array to list
-            "action": action.tolist()
-        }
-        self.episode_data.append(data)
-
-    def delete_episode_data(self):
-        self.episode_data = []  # Clear the episode data after saving
-
-
-    def save_episode(self):
-        """Mark the end of an episode and save all data"""
-
-        # Save episode data
-        for data in self.episode_data:
-            self.file.write(json.dumps(data) + '\n')
-            self.total_steps += 1
-
-        # Save episode end idx
-        episode_end = {
-            "type": "episode_end",
-            "episode_idx": self.total_steps,
-        }
-        self.file.write(json.dumps(episode_end) + '\n')
-        self.file.flush()
-        self.delete_episode_data()  # Clear the episode data after saving
-
-
-
-    
-    def close(self):
-        """Close the file"""
-        if self.file:
-            self.file.close()
-            print(f"Closed JSONL file '{self.save_name}.jsonl' with {self.total_steps} total steps")
-
-
-
-
-class Monitor():
-    def __init__(self):
-        self.status_message = None
-        self.status_active = False
-    
-    def get_layout(self):
-        """Define the layout for the Rich Live display."""
-        layout = Layout(name="root")
-        
-
-        layout.split(
-            Layout(name="header", size=3),
-            Layout(name="status", size=3), # New layout for status
-            Layout(name="main", ratio=1),
-            Layout(name="footer", size=5)
-        )
-        layout["main"].split_row(
-            Layout(name="controls"),
-            Layout(name="info")
-        )
-
-        return layout
-
-    def make_header_panel(self):
-        return Panel(
-            Align.center(
-                Text(f"Teleoperation Data Generator", justify="center", style="bold yellow"),
-                vertical="middle"
-            ),
-            title="[bold blue]DLO Pushin Teleop[/bold blue]",
-            border_style="blue",
-            box=ROUNDED
-        )
-
-    def make_controls_panel(self):
-        controls_text = Text()
-        controls_text.append("Movement Controls:\n", style="bold underline")
-        controls_text.append("  W: Move End-Effector -X (forward)\n")
-        controls_text.append("  S: Move End-Effector +X (backward)\n")
-        controls_text.append("  A: Move End-Effector -Y (left)\n")
-        controls_text.append("  D: Move End-Effector +Y (right)\n\n")
-        controls_text.append("Episode Controls:\n", style="bold underline")
-        controls_text.append("  SPACE: Save current episode data and start next episode\n")
-        controls_text.append("  BACKSPACE: Skip current episode (data will NOT be saved)\n", style="red")
-
-        return Panel(
-            controls_text,
-            title="[bold green]Controls[/bold green]",
-            border_style="green",
-            box=ROUNDED
-        )
-
-    def make_info_panel(self, 
-                        current_episode, 
-                        total_episodes, 
-                        current_step, 
-                        current_key_pressed, 
-                        end_effector: RigidLink,
-                        real_time_factor: float):
-        info_text = Text()
-        info_text.append("Real-time factor: ", style="none")
-        info_text.append(f"{real_time_factor:.3f}x\n", style="bold cyan")
-        info_text.append("Current Episode: ", style="none")
-        info_text.append(f"{current_episode}/{total_episodes}\n", style="bold cyan")
-        info_text.append("Current Step in Episode: ", style="none")
-        info_text.append(f"{current_step}\n", style="bold magenta")
-        info_text.append("Key Pressed: ", style="none")
-        info_text.append(f"{current_key_pressed}\n", style="bold yellow")
-        info_text.append("End-effector X: ", style="none")
-        info_text.append(f"{end_effector.get_pos().cpu().numpy()[0]:.4f}\n", style="bold white")
-        info_text.append("End-effector Y: ", style="none")
-        info_text.append(f"{end_effector.get_pos().cpu().numpy()[1]:.4f}\n", style="bold white")
-
-
-        return Panel(
-            info_text,
-            title="[bold blue]Information[/bold blue]",
-            border_style="blue",
-            box=ROUNDED
-        )
-
-    def make_footer_panel(self):
-        return Panel(
-            Align.center(
-                Text("Press ESC or close the window to exit.", justify="center", style="dim white"),
-                vertical="middle"
-            ),
-            border_style="white",
-            box=ROUNDED
-        )
-
-    def make_status_panel(self, 
-                          resetting : bool, 
-                          saving : bool, 
-                          current_episode: int = 0,
-                          current_step: int = 0,
-                          style: str = "bold yellow"):
-        if resetting:
-            message = "Resetting Episode..."
-        elif saving:
-            message = f"Saving Episode {current_episode} with {current_step} steps..."
-        else:
-            message = "Teleoperation in progress..."
-        return Panel(
-            Align.center(
-                Text(message, justify="center", style=style),
-                vertical="middle"
-            ),
-            title="[bold red]STATUS[/bold red]",
-            border_style="red",
-            box=ROUNDED
-        )
 
 
 
 class TeleopPushDataGenerator():
-    def __init__(self, gui=False, cpu=False, show_fps=False, save_name="dummy"):
+    def __init__(self, vis=False, gui=False, cpu=False, show_fps=False, save_name="dummy"):
+        self.vis = vis
         self.gui = gui
         self.cpu = cpu
         self.show_fps = show_fps
@@ -245,7 +59,6 @@ class TeleopPushDataGenerator():
 
         self.monitor = Monitor()
 
-        self.console = Console()
         self.current_key_pressed = "None"
         self.current_episode = 0
         self.total_episodes = 0
@@ -253,9 +66,12 @@ class TeleopPushDataGenerator():
 
 
         # Add flag for Enter key detection
-        self.spacebar_pressed = False
-        self.backspace_pressed = False
-        self.esc_pressed = False
+        self.grasp_command = False
+        self.save_command = False
+        self.reset_command = False
+        self.exit_command = False
+
+        self.grasping = False
 
         gs.init(
             backend=gs.cpu if self.cpu else gs.gpu,
@@ -286,7 +102,7 @@ class TeleopPushDataGenerator():
                 grid_density=MPM_GRID_DENSITY,
             ),
             show_FPS=self.show_fps,
-            show_viewer=False,
+            show_viewer=self.vis,
         )
 
         self.cam_front = self.scene.add_camera(
@@ -370,7 +186,7 @@ class TeleopPushDataGenerator():
             np.array([87, 87, 87, 87, 12, 12, 12, 100, 100]),
         )
 
-        self.initial_pose = np.array([0.45, 0.0, HEIGHT_OFFSET + EE_OFFSET, 0.0, 0.707, 0.707, 0.0])
+        self.initial_pose = np.array([0.45, 0.0, HEIGHT_OFFSET + EE_OFFSET + EE_Z, 0.0, 0.707, 0.707, 0.0])
 
         self.shapes = {
             "U": U_SHAPE,
@@ -404,15 +220,19 @@ class TeleopPushDataGenerator():
         """Setup pynput keyboard listener"""
         def on_press(key):
             try:
+                print(f"self.grasp_command: {self.grasp_command}")
                 if key == keyboard.Key.esc:
                     # Stop the listener and exit
-                    self.esc_pressed = True
-                elif key == keyboard.Key.space:
-                    self.spacebar_pressed = True
-                    self.current_key_pressed = "SPACE (Save & Next Episode)"
+                    self.exit_command = True
+                elif key == keyboard.Key.enter:
+                    self.save_command = True
+                    self.current_key_pressed = "ENTER (Save & Next Episode)"
                 elif key == keyboard.Key.backspace:
-                    self.backspace_pressed = True
+                    self.reset_command = True
                     self.current_key_pressed = "BACKSPACE (Skip Episode)"
+                elif key == keyboard.Key.space:
+                    self.grasp_command = True
+                    self.current_key_pressed = "SPACEBAR (Grasp)"
                 elif key.char == 's':
                     self.delta[0] = EE_VELOCITY
                     self.current_key_pressed = "S (Move +X)"
@@ -433,9 +253,11 @@ class TeleopPushDataGenerator():
         def on_release(key):
             try:
                 if key == keyboard.Key.space:
-                    self.spacebar_pressed = False
+                    self.save_command = False
                 if key == keyboard.Key.backspace:
-                    self.backspace_pressed = False
+                    self.reset_command = False
+                if key.char == 'g':
+                    self.grasp_command = False
                 if key.char == 's':
                     self.delta[0] = 0.0
                 if key.char == 'a':
@@ -473,7 +295,7 @@ class TeleopPushDataGenerator():
             pos=pose[:3],
             quat=pose[3:],
         )
-        qpos[-2:] = 0.0  # Set fingers to closed position
+        qpos[-2:] = OPEN_GRIPPER_POSITION  # Set fingers to closed position
 
         self.franka.set_qpos(qpos)
         self._step()
@@ -521,26 +343,121 @@ class TeleopPushDataGenerator():
         self.previous_ee_position = np.array([pose[0], pose[1]])
 
 
-
-
-
     def move(self):
-        """Move the robot by an x,y offset."""
+        # """Move the robot by an x,y offset."""
         current_pos = self.end_effector.get_pos().cpu().numpy()
-        # Keep the Z position constant, otherwise it can drift...
-        current_pos[2] = HEIGHT_OFFSET + EE_OFFSET
+        # # Keep the Z position constant, otherwise it can drift...
+        # if self.grasping:
+        #     current_pos[2] = HEIGHT_OFFSET + EE_OFFSET
+        # else:
+        #     current_pos[2] = HEIGHT_OFFSET + EE_OFFSET + EE_Z
         target_pos = current_pos + self.delta
+
         qpos = self.franka.inverse_kinematics(
             link=self.end_effector,
             pos=target_pos,
-            quat=[0.0, 0.707, 0.707],
+            quat=self.end_effector.get_quat().cpu().numpy()
         )
-        qpos[-2:] = 0.0
+        qpos[-2:] = CLOSE_GRIPPER_POSITION if self.grasping else OPEN_GRIPPER_POSITION
         self.franka.control_dofs_position(
             qpos,
             [*self.motors_dof, *self.fingers_dof],
         )
         self._step()
+
+
+    def move_to_target_pose(
+        self,
+        target_pos = None,
+        target_quat = None,
+        qpos = None,
+        path_period: float = 0.5,
+        distance_tolerance: float = 0.001,
+        gripper_open: bool = False,
+    ):
+        assert (target_pos is not None and target_quat is not None) or qpos is not None, \
+            "Either target position and quaternion or qpos must be provided."
+        if qpos is None:
+            qpos = self.franka.inverse_kinematics(
+                link=self.end_effector,
+                pos=target_pos,
+                quat=target_quat,
+            )
+
+        if not gripper_open:
+            qpos[-2:] = CLOSE_GRIPPER_POSITION
+        else:
+            qpos[-2:] = OPEN_GRIPPER_POSITION
+
+        num_waypoints = int(path_period // DT)
+
+        path = self.franka.plan_path(
+            qpos_goal=qpos,
+            num_waypoints=num_waypoints,
+        )
+
+
+        for p in path:
+            self.franka.control_dofs_position(p, [*self.motors_dof, *self.fingers_dof])
+            self._step()
+            ### exit if already reached ###
+            if target_pos is not None and target_quat is not None:
+                print("distance = ", np.linalg.norm(self.end_effector.get_pos().cpu().numpy() - target_pos))
+                if (np.linalg.norm(self.end_effector.get_pos().cpu().numpy() - target_pos) < distance_tolerance):
+                    break
+
+
+
+    def grasp(self):
+        print("Grasp!!")
+        # get curruent ee_position and particles
+        current_ee_pos = self.end_effector.get_pos().cpu().numpy()
+        particles = dlo_utils.get_skeleton(self.rope.get_particles(),
+                                            downsample_number=NUMBER_OF_PARTICLES,
+                                            average_number=PARTICLES_NUMBER_FOR_POS_SMOOTHING)
+        # find closest dlo particle
+        idx = dlo_utils.get_closest_particle_index(
+            particles,
+            current_ee_pos,
+        )
+        # get target pose given the idx of the particle
+        target_pos, target_quat = dlo_utils.compute_pose_from_paticle_index(
+            particles,
+            idx,
+            ee_quat_offset=EE_QUAT_ROTATION,
+            ee_offset=EE_OFFSET,
+        )
+
+        print("Moving to target pose")
+        self.move_to_target_pose(
+            target_pos=target_pos,
+            target_quat=target_quat,
+            path_period=1.0,
+            gripper_open=True,
+        )
+        print("Moved to target pose")
+        # save obs
+
+        print("Closing")
+        # close grippers
+        qpos = self.franka.get_qpos()
+        self.move_to_target_pose(
+            qpos=qpos,
+            path_period=0.5,
+            gripper_open=False,
+        )        
+        # save act
+        print("Closed")
+
+        # Set grasped state
+        self.grasping = True
+        print("GRASPING FINISHED")
+
+
+    def release(self, release_time=2.0):
+        print("Release!!")
+        self.grasping = False
+        pass
 
 
     def get_observation(self):
@@ -564,8 +481,8 @@ class TeleopPushDataGenerator():
     def run_episode(self, episode, total_episodes):
         self.current_episode = episode + 1
         self.total_episodes = total_episodes
-        self.spacebar_pressed = False
-        self.backspace_pressed = False
+        self.save_command = False
+        self.reset_command = False
         self.current_key_pressed = "None"
         
         current_step = 0
@@ -574,14 +491,14 @@ class TeleopPushDataGenerator():
         resetting = False
 
     
-        while not self.spacebar_pressed:
+        while not self.save_command:
             resetting = False
-            if self.esc_pressed:
+            if self.exit_command:
                 # Stop the listener and exit
                 self.listener.stop()
                 break
             
-            if self.backspace_pressed:
+            if self.reset_command:
                 resetting = True
                 # Reset the robot to initial pose after skipping (will show its own reset status)
                 self.reset(self.initial_pose)
@@ -599,7 +516,14 @@ class TeleopPushDataGenerator():
                 current_step += 1
                 observation = self.get_observation()
 
-            self.move()
+            if self.grasp_command:
+                self.grasp_command = False 
+                if self.grasping:
+                    self.release()
+                else:
+                    self.grasp()
+            else:
+                self.move()
 
             if loop_counter % SAVE_DATA_INTERVAL == 0 and is_moving:
                 action = self.get_action()
@@ -623,7 +547,7 @@ class TeleopPushDataGenerator():
                                                                 self.real_time_factor))
             layout["footer"].update(self.monitor.make_footer_panel())
             
-            self.live.update(layout)
+            # self.live.update(layout)
             if resetting:
                 # just to show for a while the status message
                 time.sleep(1)
@@ -636,41 +560,42 @@ class TeleopPushDataGenerator():
                                             current_step=current_step,
                                             style="bold green")
         )
-        self.live.update(layout)
+        # self.live.update(layout)
         time.sleep(1)  # Give some time to show the saving status
 
 
     def run(self, n_episodes):
         """Run the entire teleoperation data generation process."""
-        with Live(self.monitor.get_layout(), screen=True, refresh_per_second=10) as self.live:
-            try:
-                for i in range(n_episodes):
-                    # Reset is called here, and it will now show the "Resetting Episode..." status
-                    self.reset(self.initial_pose) 
-                    
-                    self.run_episode(i, n_episodes)
-                    
-                    if self.esc_pressed:
-                        # Exit if ESC is pressed without saving episode
-                        print("Esc pressed, exiting...")
-                        break
-                    
-                    # Save all episode data
-                    self.data_logger.save_episode()
+        # with Live(self.monitor.get_layout(), screen=True, refresh_per_second=10) as self.live:
+        try:
+            for i in range(n_episodes):
+                # Reset is called here, and it will now show the "Resetting Episode..." status
+                self.reset(self.initial_pose) 
+                
+                self.run_episode(i, n_episodes)
+                
+                if self.exit_command:
+                    # Exit if ESC is pressed without saving episode
+                    print("Esc pressed, exiting...")
+                    break
+                
+                # Save all episode data
+                self.data_logger.save_episode()
 
 
-            finally:
-                # Clean up the keyboard listener
-                if hasattr(self, 'listener') and self.listener.running:
-                    self.listener.stop()
-                if hasattr(self, 'live'):
-                    self.live.stop()
-                self.data_logger.close()
+        finally:
+            # Clean up the keyboard listener
+            if hasattr(self, 'listener') and self.listener.running:
+                self.listener.stop()
+            if hasattr(self, 'live'):
+                self.live.stop()
+            self.data_logger.close()
 
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Teleop Push Data Generator")
+    parser.add_argument("-v", "--vis", action="store_true")
     parser.add_argument("-g", "--gui", action="store_true", help="Enable GUI mode")
     parser.add_argument("-c", "--cpu", action="store_true", help="Run on CPU instead of GPU")
     parser.add_argument("-f", "--show_fps", action="store_true", help="Show FPS in the viewer")
@@ -678,5 +603,5 @@ if __name__ == "__main__":
     parser.add_argument("-n", "--save_name", type=str, default="dummy", help="save name")
     args = parser.parse_args()
 
-    generator = TeleopPushDataGenerator(gui=args.gui, cpu=args.cpu, show_fps=args.show_fps, save_name=args.save_name)
+    generator = TeleopPushDataGenerator(vis=args.vis, gui=args.gui, cpu=args.cpu, show_fps=args.show_fps, save_name=args.save_name)
     generator.run(n_episodes=args.n_episodes)

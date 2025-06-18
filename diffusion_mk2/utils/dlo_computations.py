@@ -163,3 +163,22 @@ def downsample_array(array: NDArray, final_length: int) -> NDArray:
         indices.append(idx_int)
 
     return np.array(indices, dtype=int)
+
+
+def get_closest_particle_index(
+    particles: NDArray[np.float32],
+    position: NDArray[np.float32]
+) -> int:
+    """
+    Returns the index of the closest particle to the given position.
+    
+    Args:
+        particles:  NumPy array of shape (n, d), where n >= 1, d >= 1.
+                    Each row is the (x,y,…) position of a rope particle.
+        position:   A NumPy array of shape (d,) representing the target position.
+
+    Returns:
+        The index of the closest particle in `particles` to `position`.
+    """
+    distances = np.linalg.norm(particles - position, axis=1)
+    return np.argmin(distances)
