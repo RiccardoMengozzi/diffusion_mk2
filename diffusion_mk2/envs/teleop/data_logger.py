@@ -24,6 +24,7 @@ class JSONLDataLogger:
                         last_episode_idx = data.get("episode_idx", last_episode_idx)
 
         self.total_steps = last_episode_idx       
+        self.episode_current_step = 0
         self.episode_data = []
         self.file = None
         
@@ -41,9 +42,11 @@ class JSONLDataLogger:
             "action": action.tolist()
         }
         self.episode_data.append(data)
+        self.episode_current_step += 1
 
     def delete_episode_data(self):
         self.episode_data = []  # Clear the episode data after saving
+        self.episode_current_step = 0
 
 
     def save_episode(self):

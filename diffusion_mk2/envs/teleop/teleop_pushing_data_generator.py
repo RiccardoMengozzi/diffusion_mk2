@@ -3,6 +3,7 @@ import argparse
 import numpy as np
 import genesis as gs
 import time
+import colorsys
 from pynput import keyboard
 from genesis.engine.entities import RigidEntity, MPMEntity
 from genesis.engine.entities.rigid_entity import RigidLink
@@ -10,6 +11,7 @@ from diffusion_mk2.utils.dlo_shapes import U_SHAPE, S_SHAPE
 import diffusion_mk2.utils.dlo_computations as dlo_utils
 from diffusion_mk2.envs.teleop.data_logger import JSONLDataLogger
 from diffusion_mk2.envs.teleop.monitor import Monitor
+from scipy.spatial.transform import Rotation as R
 
 from rich.live import Live
 
@@ -26,7 +28,7 @@ MPM_GRID_DENSITY = 256
 SUBSTEPS = 40
 TABLE_HEIGHT = 0.7005
 HEIGHT_OFFSET = TABLE_HEIGHT
-EE_OFFSET = 0.111
+EE_OFFSET = 0.108
 EE_Z = 0.04
 EE_QUAT_ROTATION = np.array([0, 0, -1, 0])
 ROPE_LENGTH = 0.2
@@ -36,9 +38,10 @@ NUMBER_OF_PARTICLES = 15
 PARTICLES_NUMBER_FOR_POS_SMOOTHING = 10
 
 
-EE_VELOCITY = 0.015
+EE_VELOCITY = 0.02
+EE_ANG_VELOCITY = 0.2
 SAVE_DATA_INTERVAL = 3 # every 3 steps
-CLOSE_GRIPPER_POSITION = 0.0   
+CLOSE_GRIPPER_POSITION = 0.00   
 OPEN_GRIPPER_POSITION = 0.01  
 
 
@@ -64,18 +67,20 @@ class TeleopPushDataGenerator():
         self.total_episodes = 0
         self.real_time_factor = 0.0
 
+        self.step_counter = 0
 
         # Add flag for Enter key detection
         self.grasp_command = False
         self.save_command = False
         self.reset_command = False
         self.exit_command = False
+        self.gripper_close_command = False
 
         self.grasping = False
 
         gs.init(
             backend=gs.cpu if self.cpu else gs.gpu,
-            logging_level="error",
+            logging_level="warning",
         )
 
         ########################## create a scene ##########################
@@ -159,10 +164,10 @@ class TeleopPushDataGenerator():
                 pos=(0.0, 0.0, HEIGHT_OFFSET),
             ),
             material=gs.materials.Rigid(
-                # friction=2.0,
-                # needs_coup=True,
-                # coup_friction=2.0,
-                # sdf_cell_size=0.005,
+                friction=5.0,
+                needs_coup=True,
+                coup_friction=5.0,
+                sdf_cell_size=0.005,
                 gravity_compensation=1.0,
             ),
         )
@@ -193,13 +198,10 @@ class TeleopPushDataGenerator():
             "S": S_SHAPE,
         }
 
-        self.delta = np.zeros(3)  # Initialize delta for movement
-        self.previous_ee_position = np.zeros(2)
-        self.accumulated_ee_displacement = 0.0
+        self.delta = np.zeros(4)  # Initialize delta for movement and rotation
 
         self.episode_observations = []
         self.episode_actions = []
-
 
         # Setup keyboard listener
         self.setup_keyboard_listener()
@@ -220,7 +222,6 @@ class TeleopPushDataGenerator():
         """Setup pynput keyboard listener"""
         def on_press(key):
             try:
-                print(f"self.grasp_command: {self.grasp_command}")
                 if key == keyboard.Key.esc:
                     # Stop the listener and exit
                     self.exit_command = True
@@ -233,6 +234,22 @@ class TeleopPushDataGenerator():
                 elif key == keyboard.Key.space:
                     self.grasp_command = True
                     self.current_key_pressed = "SPACEBAR (Grasp)"
+                elif key == keyboard.Key.left:
+                    self.delta[3] = -EE_ANG_VELOCITY
+                    self.current_key_pressed = "Q (Rotate -Z)"
+                elif key == keyboard.Key.right:
+                    self.delta[3] = EE_ANG_VELOCITY
+                    self.current_key_pressed = "E (Move +Z)"
+                elif key == keyboard.Key.up:
+                    self.delta[2] = EE_VELOCITY
+                    self.current_key_pressed = "UP (Move Up)"
+                elif key == keyboard.Key.down:
+                    z = self.end_effector.get_pos().cpu().numpy()[2]
+                    self.delta[2] = -EE_VELOCITY/2 if z > HEIGHT_OFFSET + EE_OFFSET + 0.003 else 0.0
+                    self.current_key_pressed = "DOWN (Move Down)"
+                elif key.char == 'g':
+                    self.gripper_close_command = not self.gripper_close_command
+                    self.current_key_pressed = "G (Toggle Gripper Open)"
                 elif key.char == 's':
                     self.delta[0] = EE_VELOCITY
                     self.current_key_pressed = "S (Move +X)"
@@ -254,10 +271,18 @@ class TeleopPushDataGenerator():
             try:
                 if key == keyboard.Key.space:
                     self.save_command = False
+                if key == keyboard.Key.enter:
+                    self.grasp_command = False
                 if key == keyboard.Key.backspace:
                     self.reset_command = False
-                if key.char == 'g':
-                    self.grasp_command = False
+                if key == keyboard.Key.left:
+                    self.delta[3] = 0.0
+                if key == keyboard.Key.right:
+                    self.delta[3] = 0.0
+                if key == keyboard.Key.up:
+                    self.delta[2] = 0.0
+                if key == keyboard.Key.down:
+                    self.delta[2] = 0.0
                 if key.char == 's':
                     self.delta[0] = 0.0
                 if key.char == 'a':
@@ -266,11 +291,15 @@ class TeleopPushDataGenerator():
                     self.delta[1] = 0.0
                 if key.char == 'w':
                     self.delta[0] = 0.0
+                if key.char == 'q':
+                    self.delta[3] = 0.0
+                if key.char == 'e':
+                    self.delta[3] = 0.0
                 # Only reset current_key_pressed if no movement keys are held
-                if all(d == 0.0 for d in self.delta[:2]):
+                if all(d == 0.0 for d in self.delta[:3]):
                     self.current_key_pressed = "None"
             except AttributeError:
-                if all(d == 0.0 for d in self.delta[:2]):
+                if all(d == 0.0 for d in self.delta[:3]):
                     self.current_key_pressed = "None"
 
 
@@ -339,88 +368,139 @@ class TeleopPushDataGenerator():
         self.cam_front.set_pose(pos=cam_front_pos, lookat=lookat_front)
         self.cam_side.set_pose(pos=cam_side_pos, lookat=lookat_side)
 
-        # Save current position as previous position
-        self.previous_ee_position = np.array([pose[0], pose[1]])
+        # Reset grasping state
+        self.grasping = False
 
 
-    def move(self):
-        # """Move the robot by an x,y offset."""
-        current_pos = self.end_effector.get_pos().cpu().numpy()
-        # # Keep the Z position constant, otherwise it can drift...
-        # if self.grasping:
-        #     current_pos[2] = HEIGHT_OFFSET + EE_OFFSET
-        # else:
-        #     current_pos[2] = HEIGHT_OFFSET + EE_OFFSET + EE_Z
-        target_pos = current_pos + self.delta
 
-        qpos = self.franka.inverse_kinematics(
-            link=self.end_effector,
-            pos=target_pos,
-            quat=self.end_effector.get_quat().cpu().numpy()
+    def get_observation(self):
+        pos_ee = self.end_effector.get_pos().cpu().numpy()
+        theta = R.from_quat(self.end_effector.get_quat().cpu().numpy()).as_euler('xyz')[0] # dont ask why [0], but it works
+        finger_qpos = self.franka.get_qpos().cpu().numpy()[-1]
+        obs_ee = np.array([pos_ee[0], pos_ee[1], pos_ee[2], theta, finger_qpos])
+
+        self.scene.draw_debug_sphere(
+            pos=np.array([obs_ee[0], obs_ee[1], obs_ee[2] - EE_OFFSET]),
+            radius=0.001,
+            color=(1, 0, 0, 1),  # Red color for end effector
         )
-        qpos[-2:] = CLOSE_GRIPPER_POSITION if self.grasping else OPEN_GRIPPER_POSITION
-        self.franka.control_dofs_position(
-            qpos,
-            [*self.motors_dof, *self.fingers_dof],
-        )
-        self._step()
+        obs_dlo = dlo_utils.get_skeleton(self.rope.get_particles(),
+                                            downsample_number=NUMBER_OF_PARTICLES,
+                                            average_number=PARTICLES_NUMBER_FOR_POS_SMOOTHING)
+        obs_target = self.target_shape
+        return obs_ee, obs_dlo, obs_target
 
+    def get_action(self):
+        pos_ee = self.end_effector.get_pos().cpu().numpy()
+        theta = R.from_quat(self.end_effector.get_quat().cpu().numpy()).as_euler('xyz')[0]
+        finger_qpos = self.franka.get_qpos().cpu().numpy()[-1]
 
-    def move_to_target_pose(
-        self,
-        target_pos = None,
-        target_quat = None,
-        qpos = None,
-        path_period: float = 0.5,
-        distance_tolerance: float = 0.001,
-        gripper_open: bool = False,
-    ):
-        assert (target_pos is not None and target_quat is not None) or qpos is not None, \
-            "Either target position and quaternion or qpos must be provided."
+        action = np.array([pos_ee[0], pos_ee[1], pos_ee[2], theta, finger_qpos])
+        return action
+
+ 
+    def move(self, 
+             target_pos=None,
+             target_quat=None,
+             qpos=None,
+             gripper_open=False,
+             force_control=False,
+             force_intensity=1,
+             path_period=0.5,
+             tolerance=0.001):
+        """ Primitive move function """
+        # If I already provide qpos, i don't compute it
         if qpos is None:
             qpos = self.franka.inverse_kinematics(
                 link=self.end_effector,
                 pos=target_pos,
                 quat=target_quat,
             )
+        
+        # Create the path to follow
+        if path_period == DT:
+            path = [qpos]
+        else:
+            path = self.franka.plan_path(
+                qpos_goal=qpos,
+                num_waypoints=int(path_period // DT),
+                ignore_collision=True, # Otherwise cannot grasp in a good way the rope
+            )
 
+        # Control the gripper
         if not gripper_open:
             qpos[-2:] = CLOSE_GRIPPER_POSITION
         else:
             qpos[-2:] = OPEN_GRIPPER_POSITION
 
-        num_waypoints = int(path_period // DT)
-
-        path = self.franka.plan_path(
-            qpos_goal=qpos,
-            num_waypoints=num_waypoints,
-        )
-
-
+        # Control the robot along the path
         for p in path:
-            self.franka.control_dofs_position(p, [*self.motors_dof, *self.fingers_dof])
+            ### REASONS TO EXIT ###
+            if self.exit_command or self.reset_command:
+                return
+
+
+
+            # If we are saving data, get the observation
+            if self.step_counter % SAVE_DATA_INTERVAL == 0:
+                obs_ee, obs_dlo, obs_target = self.get_observation()
+
+            self.franka.control_dofs_position(p[:-2], self.motors_dof)
+            if force_control:
+                self.franka.control_dofs_force([-force_intensity, -force_intensity], self.fingers_dof)
+            else:
+                self.franka.control_dofs_position(p[-2:], self.fingers_dof)
             self._step()
-            ### exit if already reached ###
-            if target_pos is not None and target_quat is not None:
-                print("distance = ", np.linalg.norm(self.end_effector.get_pos().cpu().numpy() - target_pos))
-                if (np.linalg.norm(self.end_effector.get_pos().cpu().numpy() - target_pos) < distance_tolerance):
+
+            # If we are saving data, get the action and append data
+            if self.step_counter % SAVE_DATA_INTERVAL == 0:
+                action = self.get_action()
+                # self.data_logger.append_data(observation, action)
+            
+            # Update global step counter
+            self.step_counter += 1
+
+            # In case we have a target position, check if we reached it
+            if target_pos is not None:
+                if np.linalg.norm(self.end_effector.get_pos().cpu().numpy() - target_pos) < tolerance:
                     break
 
 
+    def control(self):
+        current_pos = self.end_effector.get_pos().cpu().numpy()
+        current_quat = self.end_effector.get_quat().cpu().numpy()
+        target_pos = current_pos + self.delta[:3]
+
+        current_R = (R.from_quat(current_quat)).as_matrix()
+        delta_R = R.from_euler("xyz", [self.delta[3], 0.0, 0.0]).as_matrix()
+        target_R = current_R @ delta_R
+
+        target_quat = (R.from_matrix(target_R)).as_quat()
+        print("self.gripper_close_command", self.gripper_close_command)
+        gripper_open = False if self.gripper_close_command else not self.grasping
+
+        # Move to the target position
+        self.move(
+            target_pos=target_pos,
+            target_quat=target_quat,
+            path_period=DT, # only one step
+            gripper_open=gripper_open,
+        )
+
 
     def grasp(self):
-        print("Grasp!!")
-        # get curruent ee_position and particles
+        self.grasping = True
         current_ee_pos = self.end_effector.get_pos().cpu().numpy()
         particles = dlo_utils.get_skeleton(self.rope.get_particles(),
                                             downsample_number=NUMBER_OF_PARTICLES,
                                             average_number=PARTICLES_NUMBER_FOR_POS_SMOOTHING)
-        # find closest dlo particle
+        # Find the closest DLO particle
         idx = dlo_utils.get_closest_particle_index(
             particles,
             current_ee_pos,
         )
-        # get target pose given the idx of the particle
+
+        # Get the target pose based on the index of the particle
         target_pos, target_quat = dlo_utils.compute_pose_from_paticle_index(
             particles,
             idx,
@@ -428,56 +508,65 @@ class TeleopPushDataGenerator():
             ee_offset=EE_OFFSET,
         )
 
-        print("Moving to target pose")
-        self.move_to_target_pose(
+
+        self.move(
             target_pos=target_pos,
             target_quat=target_quat,
-            path_period=1.0,
-            gripper_open=True,
+            path_period=0.5,  
+            gripper_open=True,  
         )
-        print("Moved to target pose")
-        # save obs
 
-        print("Closing")
-        # close grippers
-        qpos = self.franka.get_qpos()
-        self.move_to_target_pose(
-            qpos=qpos,
-            path_period=0.5,
-            gripper_open=False,
-        )        
-        # save act
-        print("Closed")
+        # Close the gripper
+        self.move(
+            qpos=self.franka.get_qpos(),
+            path_period=DT,
+            gripper_open=False,  # Close the gripper
+            force_control=True,  # Use force control to grasp
+        )
 
-        # Set grasped state
-        self.grasping = True
-        print("GRASPING FINISHED")
-
-
-    def release(self, release_time=2.0):
-        print("Release!!")
+    def release(self):
+        """Release the grasped object."""
         self.grasping = False
-        pass
+        # Open the gripper
+        self.move(
+            qpos=self.franka.get_qpos(),
+            path_period=DT,
+            gripper_open=True,  # Open the gripper
+        )
+
+        # Move up
+        self.move(
+            target_pos=self.end_effector.get_pos().cpu().numpy() + np.array([0, 0, EE_Z]),
+            target_quat=self.end_effector.get_quat().cpu().numpy(),
+            path_period=0.5,
+            gripper_open=True,  # Keep the gripper open
+        )
 
 
-    def get_observation(self):
-        obs_ee = self.end_effector.get_pos().cpu().numpy()[:2]
-        # self.scene.draw_debug_sphere(
-        #     pos=np.array([obs_ee[0], obs_ee[1], HEIGHT_OFFSET + ROPE_RADIUS/2]),
-        #     radius=0.001,
-        #     color=(1, 0, 0, 1),  # Red color for end effector
-        # )
-        obs_dlo = dlo_utils.get_skeleton(self.rope.get_particles(),
+
+    def show_grasping_point(self):
+        self.scene.clear_debug_objects()
+        dlo_utils.draw_skeleton(self.target_shape, self.scene, ROPE_RADIUS)
+        
+        current_ee_pos = self.end_effector.get_pos().cpu().numpy()
+        particles = dlo_utils.get_skeleton(self.rope.get_particles(),
                                             downsample_number=NUMBER_OF_PARTICLES,
-                                            average_number=PARTICLES_NUMBER_FOR_POS_SMOOTHING)[:, :2]
-        obs_target = self.target_shape[:, :2]
-        return np.vstack([obs_ee, obs_dlo, obs_target])
+                                            average_number=PARTICLES_NUMBER_FOR_POS_SMOOTHING)
+        # Find the closest DLO particle
+        idx = dlo_utils.get_closest_particle_index(
+            particles,
+            current_ee_pos,
+        )
+        grasping_point = particles[idx]
 
-    def get_action(self):
-        action = self.end_effector.get_pos().cpu().numpy()[:2]
-        return action
+        self.scene.draw_debug_sphere(
+            pos=grasping_point,
+            radius=ROPE_RADIUS + 0.001,
+            color=(0.0, 0.0, 1.0, 1.0),
+        )
 
- 
+
+
     def run_episode(self, episode, total_episodes):
         self.current_episode = episode + 1
         self.total_episodes = total_episodes
@@ -485,12 +574,8 @@ class TeleopPushDataGenerator():
         self.reset_command = False
         self.current_key_pressed = "None"
         
-        current_step = 0
-        loop_counter = 0
-
         resetting = False
 
-    
         while not self.save_command:
             resetting = False
             if self.exit_command:
@@ -505,16 +590,10 @@ class TeleopPushDataGenerator():
                 # Clear the episode data for this skipped episode
                 self.data_logger.delete_episode_data()  
                 # Reset the step counter
-                current_step = 0
 
 
-
-            is_moving = self.delta[0] != 0.0 or self.delta[1] != 0.0
-            loop_counter += 1
-
-            if loop_counter % SAVE_DATA_INTERVAL == 0 and is_moving:
-                current_step += 1
-                observation = self.get_observation()
+            # if not self.grasping:
+            #     self.show_grasping_point()
 
             if self.grasp_command:
                 self.grasp_command = False 
@@ -523,11 +602,7 @@ class TeleopPushDataGenerator():
                 else:
                     self.grasp()
             else:
-                self.move()
-
-            if loop_counter % SAVE_DATA_INTERVAL == 0 and is_moving:
-                action = self.get_action()
-                self.data_logger.append_data(observation, action)
+                self.control()
 
             # Update Rich layout
             layout = self.monitor.get_layout()
@@ -536,12 +611,12 @@ class TeleopPushDataGenerator():
             layout["status"].update(
                 self.monitor.make_status_panel(resetting=resetting, saving=False,
                                                 current_episode=self.current_episode,
-                                                current_step=current_step,
+                                                current_step=self.data_logger.episode_current_step,
                                                 style="bold green")
             )
             layout["info"].update(self.monitor.make_info_panel(self.current_episode, 
                                                                 self.total_episodes,
-                                                                current_step,
+                                                                self.data_logger.episode_current_step,
                                                                 self.current_key_pressed,
                                                                 self.end_effector,
                                                                 self.real_time_factor))
@@ -557,7 +632,7 @@ class TeleopPushDataGenerator():
         layout["status"].update(
             self.monitor.make_status_panel(resetting=False, saving=True,
                                             current_episode=self.current_episode,
-                                            current_step=current_step,
+                                            current_step=self.data_logger.episode_current_step,
                                             style="bold green")
         )
         # self.live.update(layout)
