@@ -202,6 +202,7 @@ class TeleopPushDataGenerator():
 
         self.episode_observations = []
         self.episode_actions = []
+        self.previous_qpos = np.zeros(9)  # Initialize previous qpos for the robot
 
         # Setup keyboard listener
         self.setup_keyboard_listener()
@@ -371,6 +372,8 @@ class TeleopPushDataGenerator():
         # Reset grasping state
         self.grasping = False
 
+        self.previous_qpos = self.franka.get_qpos().cpu().numpy()   
+
 
 
     def get_observation(self):
@@ -407,7 +410,7 @@ class TeleopPushDataGenerator():
              force_control=False,
              force_intensity=1,
              path_period=0.5,
-             tolerance=0.001):
+             tolerance=1e-7):
         """ Primitive move function """
         # If I already provide qpos, i don't compute it
         if qpos is None:
@@ -439,10 +442,12 @@ class TeleopPushDataGenerator():
             if self.exit_command or self.reset_command:
                 return
 
-
+            movement = np.linalg.norm(self.franka.get_qpos().cpu().numpy() - self.previous_qpos)
+            self.previous_qpos = self.franka.get_qpos().cpu().numpy()
+            is_moving = movement > 5e-4
 
             # If we are saving data, get the observation
-            if self.step_counter % SAVE_DATA_INTERVAL == 0:
+            if self.step_counter % SAVE_DATA_INTERVAL == 0 and is_moving:
                 obs_ee, obs_dlo, obs_target = self.get_observation()
 
             self.franka.control_dofs_position(p[:-2], self.motors_dof)
@@ -453,17 +458,16 @@ class TeleopPushDataGenerator():
             self._step()
 
             # If we are saving data, get the action and append data
-            if self.step_counter % SAVE_DATA_INTERVAL == 0:
+            if self.step_counter % SAVE_DATA_INTERVAL == 0 and is_moving:
                 action = self.get_action()
-                # self.data_logger.append_data(observation, action)
+                self.data_logger.append_data(obs_ee, obs_dlo, obs_target, action)
             
             # Update global step counter
             self.step_counter += 1
 
-            # In case we have a target position, check if we reached it
-            if target_pos is not None:
-                if np.linalg.norm(self.end_effector.get_pos().cpu().numpy() - target_pos) < tolerance:
-                    break
+            # Check if the robot has reached the target position
+            if np.linalg.norm(qpos.cpu().numpy() - self.franka.get_qpos().cpu().numpy()) < tolerance:
+                break
 
 
     def control(self):
@@ -476,7 +480,6 @@ class TeleopPushDataGenerator():
         target_R = current_R @ delta_R
 
         target_quat = (R.from_matrix(target_R)).as_quat()
-        print("self.gripper_close_command", self.gripper_close_command)
         gripper_open = False if self.gripper_close_command else not self.grasping
 
         # Move to the target position
@@ -490,6 +493,8 @@ class TeleopPushDataGenerator():
 
     def grasp(self):
         self.grasping = True
+        self.gripper_close_command = False # Override the gripper close command
+
         current_ee_pos = self.end_effector.get_pos().cpu().numpy()
         particles = dlo_utils.get_skeleton(self.rope.get_particles(),
                                             downsample_number=NUMBER_OF_PARTICLES,
@@ -507,6 +512,17 @@ class TeleopPushDataGenerator():
             ee_quat_offset=EE_QUAT_ROTATION,
             ee_offset=EE_OFFSET,
         )
+
+        # If gripper is closed, open it first
+        qpos = self.franka.get_qpos()
+        if qpos[-1] < CLOSE_GRIPPER_POSITION:
+            print("Opening gripper before grasping...")
+            qpos[-2:] = OPEN_GRIPPER_POSITION  # Open the gripper
+            self.move(
+                qpos=qpos,
+                path_period=0.5,
+                gripper_open=True,  # Open the gripper
+            )
 
 
         self.move(
@@ -527,10 +543,14 @@ class TeleopPushDataGenerator():
     def release(self):
         """Release the grasped object."""
         self.grasping = False
+        self.gripper_close_command = False # Override the gripper close command
+
         # Open the gripper
+        qpos = self.franka.get_qpos()
+        qpos[-2:] = OPEN_GRIPPER_POSITION  # Open the gripper
         self.move(
-            qpos=self.franka.get_qpos(),
-            path_period=DT,
+            qpos=qpos,
+            path_period=0.5,
             gripper_open=True,  # Open the gripper
         )
 

@@ -1,14 +1,15 @@
-import numpy as np
 import os
 import glob
 import argparse
+import json
+import numpy as np # Still useful for internal array handling if needed, though less critical for direct JSONL output
 
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-
-
-def combine_datasets(input_pattern: str = "npz_data/dataset_*.npz", output_name: str = "npz_data/combined_dataset.npz"):
-    """Combine multiple dataset files into one."""
+def combine_datasets_to_jsonl(input_pattern: str = "json_data/prova_*.jsonl", output_name: str = "json_data/combined_dataset.jsonl"):
+    """Combine multiple JSONL dataset files into one JSONL file,
+    correctly accumulating episode ends."""
+    
     input_pattern = os.path.join(PROJECT_DIR, input_pattern)
     output_path = os.path.join(PROJECT_DIR, output_name)
     
@@ -24,61 +25,73 @@ def combine_datasets(input_pattern: str = "npz_data/dataset_*.npz", output_name:
     for f in files:
         print(f"  {f}")
     
-    all_observations = []
-    all_actions = []
-    all_episode_ends = []
-    total_steps = 0
+    combined_output_lines = []
+    total_observations_so_far = 0 # This will track the cumulative number of 'data' entries
     
+    total_number_of_observations = 0
+    total_number_of_episode_ends = 0
     for file_path in files:
         print(f"Loading {file_path}...")
         try:
-            data = np.load(file_path)
-            observations = data["observations"]
-            actions = data["actions"]
-            episode_ends = data["episode_ends"]
+            observations_in_current_file = 0
+            ep_ends_counter = 0
+            ep_ends = []
+            with open(file_path, 'r') as f:
+                for line in f:
+                    data = json.loads(line)
+                    
+                    if data.get("type") == "data":
+                        # For 'data' entries, just append them as they are
+                        combined_output_lines.append(json.dumps(data))
+                        observations_in_current_file += 1
+                        total_number_of_observations += 1
+                    elif data.get("type") == "episode_end":
+                        # For 'episode_end' entries, adjust the 'episode_idx'
+                        # The 'episode_idx' should refer to the index in the *global* sequence of observations
+                        # So, we add the total observations encountered *before* this file.
+                        
+                        # Ensure 'episode_idx' exists and is an integer
+                        if "episode_idx" in data and isinstance(data["episode_idx"], int):
+                            adjusted_episode_idx = data["episode_idx"] + total_observations_so_far
+                            data["episode_idx"] = adjusted_episode_idx
+                            combined_output_lines.append(json.dumps(data))
+                            # for loggin
+                            ep_ends_counter += 1
+                            total_number_of_episode_ends += 1
+                            ep_ends.append(adjusted_episode_idx)
+                        else:
+                            print(f"  Warning: 'episode_end' entry in {file_path} without valid 'episode_idx': {data}")
             
-            all_observations.append(observations)
-            all_actions.append(actions)
+            total_observations_so_far += observations_in_current_file
             
-            # Adjust episode ends for cumulative counting
-            adjusted_episode_ends = [end + total_steps for end in episode_ends]
-            all_episode_ends.extend(adjusted_episode_ends)
-            total_steps += len(observations)
+            print(f"  Added {observations_in_current_file} observations and {ep_ends_counter} episode ends {ep_ends} from {file_path}") # This count is a bit tricky, simpler to just say "lines"
             
-            print(f"  Added {len(observations)} observations")
-            
+        except json.JSONDecodeError as e:
+            print(f"  Error decoding JSON in {file_path} at line: {line.strip()}. Error: {e}")
         except Exception as e:
-            print(f"  Error loading {file_path}: {e}")
+            print(f"  An unexpected error occurred loading {file_path}: {e}")
     
-    if not all_observations:
-        print("No valid datasets found!")
+    if not combined_output_lines:
+        print("No valid data loaded from any files. Exiting.")
         return
-    
-    # Combine all data
-    combined_observations = np.concatenate(all_observations, axis=0)
-    combined_actions = np.concatenate(all_actions, axis=0)
-    
-    # Save combined dataset
-    np.savez(
-        output_path,
-        observations=combined_observations,
-        actions=combined_actions,
-        episode_ends=all_episode_ends
-    )
+
+    # Write all accumulated lines to the output JSONL file
+    with open(output_path, 'w') as f:
+        for line in combined_output_lines:
+            f.write(line + '\n')
     
     print(f"\nCombined dataset saved to: {output_path}")
-    print(f"Total observations: {len(combined_observations)}")
-    print(f"Total actions: {len(combined_actions)}")
-    print(f"Total episodes: {len(all_episode_ends)}")
-
+    print(f"Total lines in combined JSONL: {len(combined_output_lines)}")
+    print(f"Total observations: {total_number_of_observations}")
+    print(f"Total episode ends: {total_number_of_episode_ends}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input_pattern", type=str, default="npz_data/dataset_*.npz", 
-                       help="Pattern to match input files")
-    parser.add_argument("--output_name", type=str, default="npz_data/combined_dataset.npz", 
-                       help="Path for combined output")
+    parser.add_argument("--input_pattern", type=str, default="json_data/dataset_*.jsonl", 
+                       help="Pattern to match input JSONL files (e.g., 'json_data/prova_*.jsonl')")
+    parser.add_argument("--output_name", type=str, default="json_data/combined_dataset.jsonl", 
+                       help="Path for combined output (will be saved as .jsonl)")
     
     args = parser.parse_args()
     
-    combine_datasets(args.input_pattern, args.output_name)
+    combine_datasets_to_jsonl(args.input_pattern, args.output_name)

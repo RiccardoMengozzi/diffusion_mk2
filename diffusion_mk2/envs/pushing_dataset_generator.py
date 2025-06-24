@@ -1,31 +1,26 @@
+import os
 import argparse
 import numpy as np
 import genesis as gs
-import os
+import time
+import colorsys
+from pynput import keyboard
 from genesis.engine.entities import RigidEntity, MPMEntity
 from genesis.engine.entities.rigid_entity import RigidLink
-from numpy.typing import NDArray
-from typing import Tuple
-from scipy.spatial.transform import Rotation as R
-import time
-from tqdm import tqdm
+from diffusion_mk2.utils.dlo_shapes import U_SHAPE, S_SHAPE
 import diffusion_mk2.utils.dlo_computations as dlo_utils
+from diffusion_mk2.envs.teleop.data_logger import JSONLDataLogger
+from diffusion_mk2.envs.teleop.monitor import Monitor
+from scipy.spatial.transform import Rotation as R
+
+from rich.live import Live
 
 
-np.set_printoptions(
-    precision=4,  # number of digits after the decimal
-    suppress=True,  # disable scientific notation for small numbers
-    linewidth=120,  # max characters per line before wrapping
-    threshold=1000,  # max total elements to print before summarizing
-    edgeitems=3,  # how many items at array edges to show
-    formatter={  # custom formatting per dtype
-        float: "{: .4f}".format,
-        int: "{: d}".format,
-    },
-)
+
+
 PROJECT_FOLDER = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 NUMBER_OF_EPISODES = 3
-NUMBER_OF_ACTIONS_PER_EPISODE = 8
+NUMBER_OF_ACTIONS_PER_EPISODE = 8 # This is not directly used in the teleop script, but kept for consistency
 ACTION_TIME = 2.0  # seconds (for 256 batch size)
 VELOCITY = 0.05  # m/s
 DT = 1e-2  # simulation time step
@@ -33,7 +28,8 @@ MPM_GRID_DENSITY = 256
 SUBSTEPS = 40
 TABLE_HEIGHT = 0.7005
 HEIGHT_OFFSET = TABLE_HEIGHT
-EE_OFFSET = 0.119
+EE_OFFSET = 0.105
+EE_Z = 0.07
 EE_QUAT_ROTATION = np.array([0, 0, -1, 0])
 ROPE_LENGTH = 0.2
 ROPE_RADIUS = 0.003
@@ -42,31 +38,46 @@ NUMBER_OF_PARTICLES = 15
 PARTICLES_NUMBER_FOR_POS_SMOOTHING = 10
 
 
-class PushingDatasetGenerator:
-    def __init__(
-        self,
-        cpu: bool = False,
-        gui: bool = True,
-        vis: bool = True,
-        show_fps: bool = False,
-        n_episodes: int = 3,
-        n_actions: int = 10,
-        action_length: int = 10,
-        save_name: str =  "dummy.npz",
-    ):
+EE_VELOCITY = 0.02
+EE_ANG_VELOCITY = 0.2
+SAVE_DATA_INTERVAL = 3 # every 3 steps
+CLOSE_GRIPPER_POSITION = 0.00   
+OPEN_GRIPPER_POSITION = 0.01  
 
-        self.cpu = cpu
-        self.gui = gui
+
+
+
+class PushDataGenerator():
+    def __init__(self, 
+                 vis=False, 
+                 gui=False, 
+                 cpu=False,
+                 n_episodes=NUMBER_OF_EPISODES,
+                 show_fps=False, 
+                 save_name="dummy"):
+        
         self.vis = vis
-        self.show_fps = show_fps
+        self.gui = gui
+        self.cpu = cpu
         self.n_episodes = n_episodes
-        self.n_actions = n_actions
-        self.action_length = action_length
+        self.show_fps = show_fps
 
-        self.npz_save_path = os.path.join(PROJECT_FOLDER, "npz_data", save_name)
+        save_path = os.path.join(PROJECT_FOLDER, "json_data")
+        if not os.path.exists(save_path):
+            os.makedirs(save_path, exist_ok=True)
+        self.data_logger = JSONLDataLogger(save_path, save_name + ".jsonl")
+        self.data_logger.initialize_file()
+
+        self.current_episode = 0
+        self.total_episodes = 0
+        self.real_time_factor = 0.0
+
+        self.step_counter = 0
+
+
         gs.init(
             backend=gs.cpu if self.cpu else gs.gpu,
-            logging_level="error",
+            logging_level="warning",
         )
 
         ########################## create a scene ##########################
@@ -96,13 +107,7 @@ class PushingDatasetGenerator:
             show_viewer=self.vis,
         )
 
-        self.cam = self.scene.add_camera(
-            res=(1080, 720),
-            pos=(0.5, -0.5, TABLE_HEIGHT + 0.6),
-            lookat=(0.5, 0.0, TABLE_HEIGHT),
-            fov=50,
-            GUI=self.gui,
-        )
+
 
         ########################## entities ##########################
         self.plane = self.scene.add_entity(
@@ -142,10 +147,11 @@ class PushingDatasetGenerator:
                 pos=(0.0, 0.0, HEIGHT_OFFSET),
             ),
             material=gs.materials.Rigid(
-                friction=2.0,
+                friction=5.0,
                 needs_coup=True,
-                coup_friction=2.0,
+                coup_friction=5.0,
                 sdf_cell_size=0.005,
+                gravity_compensation=1.0,
             ),
         )
 
@@ -168,493 +174,263 @@ class PushingDatasetGenerator:
             np.array([87, 87, 87, 87, 12, 12, 12, 100, 100]),
         )
 
-    def _reset(self, clear_debug: bool = True) -> None:
-        """Reset the environment for a new episode."""
-        if clear_debug:
-            self.scene.clear_debug_objects()
-        # Reset robot to initial position
-        qpos = np.array([0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785, 0.04, 0.04])
-        self.franka.set_qpos(qpos)
-        
-        # Reset rope with random position
-        rope_pos = ROPE_BASE_POSITION + np.array([
-            np.random.uniform(low=-0.05, high=0.05),
-            np.random.uniform(low=-0.05, high=0.05),
-            0.0
-        ])
-        self.rope.set_position(rope_pos)
-        
-
-        # Step to initialize positions
-        self._step()
+        self.initial_pose = np.array([0.45, 0.0, HEIGHT_OFFSET + EE_OFFSET + EE_Z, 0.0, 0.707, 0.707, 0.0])
 
 
+        self.episode_observations = []
+        self.episode_actions = []
 
-    def _step(
-        self,
-        track: bool = False,
-        link=None,
-        track_offset=np.array([0.0, 0.0, 0.0]),
-        gui: bool = False,
-        render_interval: int = 1,
-        current_step: int = 1,
-        draw_skeleton_frames: bool = False,
-        show_real_time_factor: bool = False,
-    ) -> None:
-        """
-        Step the scene and update the camera.
-        """
+
+    def _step(self):
         start_time = time.time()
 
-        render = False
-        if current_step % render_interval == 0:
-            render = True
-
-        self.scene.step(update_visualizer=render)
-        if draw_skeleton_frames:
-            assert (
-                self.rope is not None
-            ), "Rope entity must be provided to draw skeleton frames."
-            particles = self.sample_skeleton_particles(
-                self.rope.get_particles(),
-                NUMBER_OF_PARTICLES,
-                PARTICLES_NUMBER_FOR_POS_SMOOTHING,
-            )
-            self.draw_skeleton(particles, self.scene)
-        if gui:
-            if render:
-                self.cam.render()
-        if track:
-            assert link is not None, "Link must be provided to track the camera."
-            ee_pos = link.get_pos().cpu().numpy() + track_offset
-            self.cam.set_pose(pos=ee_pos, lookat=[ee_pos[0], ee_pos[1], 0.0])
-
+        self.scene.step()
         end_time = time.time()
-        if show_real_time_factor:
-            real_time_factor = DT / (end_time - start_time)
-            print(f"Real-time factor: {real_time_factor:.4f}x")
+        self.real_time_factor = DT / (end_time - start_time)
 
 
-    def _get_random_ee_position(self,
-                                particles: NDArray[np.float32],
-                                idx: int,   
-                                max_distance: float = 0.1,
-                                min_distance: float = 0.01,
-                                max_attempts: int = 1000
-                                ) -> NDArray:
-        """
-        Compute the initial end-effector pose based on a particle's position and orientation.
-        Args:
-            particles (NDArray[np.float32]): Array of rope particle positions
-            particle_pos (NDArray[np.float32]): Position of the selected particle
-            particle_quat (NDArray[np.float32]): Quaternion orientation of the selected particle
-        Returns:    
-            Tuple[NDArray, NDArray]: Initial end-effector position and quaternion
-        """
-        particle_pos = particles[idx]
-        for _ in range(max_attempts):
-            # 1. Random angle and distance for XY
-            angle = np.random.uniform(0, 2 * np.pi)
-            distance = np.random.uniform(min_distance, max_distance)
+    def reset(self):
+        """Reset the environment for a new episode."""
+        self.scene.clear_debug_objects()
 
-            # Calculate proposed XY relative to particle_pos
-            delta_x = distance * np.cos(angle)
-            delta_y = distance * np.sin(angle)
-
-            # Proposed 3D position
-            proposed_ee_pos = np.array([
-                particle_pos[0] + delta_x,
-                particle_pos[1] + delta_y,
-                HEIGHT_OFFSET + EE_OFFSET # Fixed Z
-            ])
-
-            # 2. Check clearance from all rope particles
-            is_too_close = False
-            for p in particles:
-                # Only consider XY distance for clearance check
-                dist_to_particle = np.linalg.norm(proposed_ee_pos[:2] - p[:2])
-                if dist_to_particle < min_distance:
-                    is_too_close = True
-                    break
-            
-            if not is_too_close:
-                return proposed_ee_pos
-            
-        # If loop finishes without finding a valid pose
-        raise RuntimeError(
-            f"Could not find a suitable initial EE pose after {max_attempts} attempts."
-        )
+        # Place robot aboce centre of the rope
+        skeleton = dlo_utils.get_skeleton(self.rope.get_particles(),
+                                            downsample_number=NUMBER_OF_PARTICLES,
+                                            average_number=PARTICLES_NUMBER_FOR_POS_SMOOTHING)
+        skeleton_centre = np.array([np.mean(skeleton[:, 0]),
+                                    np.mean(skeleton[:, 1])])
         
+        target_pos = [skeleton_centre[0], skeleton_centre[1], HEIGHT_OFFSET + EE_OFFSET + EE_Z]
+        target_quat = self.initial_pose[3:7]  # Use the initial pose's quaternion
 
-
-    def _move_to_target_pose(
-        self,
-        target_pos: NDArray,
-        target_quat: NDArray,
-        path_period: float = 0.5,
-        distance_tolerance: float = 0.005,
-    ):
         qpos = self.franka.inverse_kinematics(
             link=self.end_effector,
             pos=target_pos,
             quat=target_quat,
         )
-        qpos[-2:] = 0.0  # Close fingers
+        qpos[-2:] = OPEN_GRIPPER_POSITION  # Open gripper at the start
 
-        num_waypoints = int(path_period // DT)
-        print(f"Number of waypoints: {num_waypoints}")
-        path = self.franka.plan_path(
-            qpos_goal=qpos,
-            num_waypoints=num_waypoints,
+        self.franka.set_qpos(qpos)
+        self._step()
+
+
+
+
+    def get_observation(self):
+        pos_ee = self.end_effector.get_pos().cpu().numpy()
+        theta = R.from_quat(self.end_effector.get_quat().cpu().numpy()).as_euler('xyz')[0] # dont ask why [0], but it works
+        finger_qpos = self.franka.get_qpos().cpu().numpy()[-1]
+        obs_ee = np.array([pos_ee[0], pos_ee[1], pos_ee[2], theta, finger_qpos])
+
+        self.scene.draw_debug_sphere(
+            pos=np.array([obs_ee[0], obs_ee[1], obs_ee[2] - EE_OFFSET]),
+            radius=0.001,
+            color=(1, 0, 0, 1),  # Red color for end effector
         )
-        obss = []
-        acts = []
+        obs_dlo = dlo_utils.get_skeleton(self.rope.get_particles(),
+                                            downsample_number=NUMBER_OF_PARTICLES,
+                                            average_number=PARTICLES_NUMBER_FOR_POS_SMOOTHING)
+        return obs_ee, obs_dlo
+
+    def get_action(self):
+        pos_ee = self.end_effector.get_pos().cpu().numpy()
+        theta = R.from_quat(self.end_effector.get_quat().cpu().numpy()).as_euler('xyz')[0]
+        finger_qpos = self.franka.get_qpos().cpu().numpy()[-1]
+
+        action = np.array([pos_ee[0], pos_ee[1], pos_ee[2], theta, finger_qpos])
+        return action
+
+ 
+    def move(self, 
+             target_pos=None,
+             target_quat=None,
+             qpos=None,
+             gripper_open=False,
+             force_control=False,
+             force_intensity=1,
+             path_period=0.5,
+             tolerance=1e-7,
+             save_data=False):
+        """ Primitive move function """
+        # If I already provide qpos, i don't compute it
+        if qpos is None:
+            qpos = self.franka.inverse_kinematics(
+                link=self.end_effector,
+                pos=target_pos,
+                quat=target_quat,
+            )
+        
+        # Create the path to follow
+        if path_period == DT:
+            path = [qpos]
+        else:
+            path = self.franka.plan_path(
+                qpos_goal=qpos,
+                num_waypoints=int(path_period // DT),
+                ignore_collision=True, # Otherwise cannot grasp in a good way the rope
+            )
+
+        # Control the gripper
+        if not gripper_open:
+            qpos[-2:] = CLOSE_GRIPPER_POSITION
+        else:
+            qpos[-2:] = OPEN_GRIPPER_POSITION
+
+        # Control the robot along the path
         for p in path:
-            self.franka.control_dofs_position(p, [*self.motors_dof, *self.fingers_dof])
+            # If we are saving data, get the observation
+            if self.step_counter % SAVE_DATA_INTERVAL == 0 and save_data:
+                obs_ee, obs_dlo = self.get_observation()
 
-            ####### save ee_init and dlo state obs #######
-            obs_ee = self.end_effector.get_pos()[:2].cpu().numpy()
-            obs_dlo = dlo_utils.get_skeleton(self.rope.get_particles(),
-                                             downsample_number=NUMBER_OF_PARTICLES,
-                                             average_number=PARTICLES_NUMBER_FOR_POS_SMOOTHING)[:, :2]
-
+            self.franka.control_dofs_position(p[:-2], self.motors_dof)
+            if force_control:
+                self.franka.control_dofs_force([-force_intensity, -force_intensity], self.fingers_dof)
+            else:
+                self.franka.control_dofs_position(p[-2:], self.fingers_dof)
             self._step()
 
-            ####### save ee_final observation and ee_final action #######
-            obs_dlo_f = dlo_utils.get_skeleton(self.rope.get_particles(),
-                                               downsample_number=NUMBER_OF_PARTICLES,
-                                               average_number=PARTICLES_NUMBER_FOR_POS_SMOOTHING)[:, :2]
-            act = self.end_effector.get_pos()[:2].cpu().numpy()
+            # If we are saving data, get the action and append data
+            if self.step_counter % SAVE_DATA_INTERVAL == 0 and save_data:
+                action = self.get_action()
+                self.data_logger.append_data(obs_ee, obs_dlo, obs_dlo, action) #target will be changed at the end of the action
+            
+            # Update global step counter
+            self.step_counter += 1
 
-            ####### save observations and actions #######
-            obss.append(np.vstack([obs_ee, obs_dlo, obs_dlo_f]))
-            acts.append(act) # so it's (1, 2) instead of (2,)
-
-            ### exit if already reached ###
-            if (np.linalg.norm(self.end_effector.get_pos().cpu().numpy()[:2] - target_pos[:2]) < distance_tolerance):
+            # Check if the robot has reached the target position
+            if np.linalg.norm(qpos.cpu().numpy() - self.franka.get_qpos().cpu().numpy()) < tolerance:
                 break
 
-        return np.array(obss), np.array(acts)
 
-    def _get_random_action_through_dlo(
-        self,
-        particles: NDArray[np.float32],
-        idx: int,
-        ee_position: NDArray,
-        min_strike_distance: float = 0.01,
-        max_strike_distance: float = 0.1,
-        debug: bool = False,
-    ) -> NDArray:
-        """
-        Get the target position for the action based on a particle index.
+    def grasp(self, idx):
+        particles = dlo_utils.get_skeleton(self.rope.get_particles(),
+                                            downsample_number=NUMBER_OF_PARTICLES,
+                                            average_number=PARTICLES_NUMBER_FOR_POS_SMOOTHING)
 
-        Args:
-            particles (NDArray[np.float32]): Array of rope particle positions
-            particle_index (int): Index of the particle to use for target position
-            initial_ee_pos (NDArray): Initial end-effector position
-
-        Returns:
-            NDArray: Target position for the action
-        """
-        particle_position = particles[idx]
-        # Get the 2D position of the target particle
-        target_particle_xy = particle_position[:2]
-
-        # Calculate the vector from initial_ee_pos (XY) to the target particle (XY)
-        vector_to_target_particle = target_particle_xy - ee_position[:2]
-
-        # Calculate the scalar distance from initial_ee_pos to the target particle
-        distance_to_target_particle = np.linalg.norm(vector_to_target_particle)
-
-        # Normalize the direction vector
-        # Handle case where initial_ee_pos is exactly on the particle (unlikely but possible)
-        if distance_to_target_particle < 1e-6:  # Epsilon to avoid division by zero
-            action_direction_xy = np.array([0.0, 1.0])  # Default to +Y if at target
-        else:
-            action_direction_xy = (
-                vector_to_target_particle / distance_to_target_particle
-            )
-
-        # Determine the total scalar movement distance
-        # You want to strike through the particle, so the movement should be
-        # (distance to particle) + (some additional strike depth beyond particle)
-        strike_depth_beyond_particle = np.random.uniform(
-            min_strike_distance, max_strike_distance
-        )
-        total_movement_distance = (
-            distance_to_target_particle + strike_depth_beyond_particle
+        # Get the target pose based on the index of the particle
+        target_pos, target_quat = dlo_utils.compute_pose_from_paticle_index(
+            particles,
+            idx,
+            ee_quat_offset=EE_QUAT_ROTATION,
+            ee_offset=EE_OFFSET,
         )
 
-        # Calculate the final target position
-        # Start from initial_ee_pos and move along the normalized direction
-        action_target_pos_xy = (
-            ee_position[:2] + action_direction_xy * total_movement_distance
+        self.move(
+            target_pos=target_pos,
+            target_quat=target_quat,
+            path_period=1.0,  
+            gripper_open=True,  
+            save_data=True,  # Save data during this action
         )
 
-        action_target_pos = np.array(
-            [
-                action_target_pos_xy[0],
-                action_target_pos_xy[1],
-                HEIGHT_OFFSET + EE_OFFSET + ROPE_RADIUS / 2,  # Fixed Z position
-            ]
+        # Close the gripper
+        self.move(
+            qpos=self.franka.get_qpos(),
+            path_period=0.5,
+            gripper_open=False,  # Close the gripper
+            force_control=True,  # Use force control to grasp
+            save_data=True,  # Save data during this action
         )
 
-        if debug:
-            self.scene.clear_debug_objects()
-            # Draw particle position
-            self.scene.draw_debug_sphere(
-                pos=particle_position,
-                radius=0.005,
-                color=(1, 0, 0, 1),
+    def release(self):
+        """Release the grasped object."""
+        # Open the gripper
+        qpos = self.franka.get_qpos()
+        qpos[-2:] = OPEN_GRIPPER_POSITION  # Open the gripper
+        self.move(
+            qpos=qpos,
+            path_period=0.5,
+            gripper_open=True,  # Open the gripper
+        )
+
+        # Move up
+        self.move(
+            target_pos=self.end_effector.get_pos().cpu().numpy() + np.array([0, 0, EE_Z]),
+            target_quat=self.end_effector.get_quat().cpu().numpy(),
+            path_period=0.5,
+            gripper_open=True,  # Keep the gripper open
+        )
+
+    def random_action(self):
+        """Generate a random action for the robot."""
+        # Randomly choose a delta for movement and rotation
+        current_pos = self.end_effector.get_pos().cpu().numpy()
+        current_quat = self.end_effector.get_quat().cpu().numpy()
+
+        delta_xy = np.random.uniform(-0.05, 0.05, size=2)
+        delta_yaw = np.random.uniform(-np.pi / 4, np.pi / 4)  # Random yaw rotation
+
+        target_pos = [current_pos[0] + delta_xy[0], current_pos[1] + delta_xy[1], current_pos[2]]
+
+        current_R = (R.from_quat(current_quat)).as_matrix()
+        delta_R = R.from_euler("xyz", [delta_yaw, 0.0, 0.0]).as_matrix()
+        target_R = current_R @ delta_R
+
+        target_quat = (R.from_matrix(target_R)).as_quat()
+
+        # Move to the target position
+        self.move(
+            target_pos=target_pos,
+            target_quat=target_quat,
+            path_period=1.0, # only one step
+            gripper_open=False,
+            save_data=True,  # Save data during this action
+        )
+
+    def update_action_data(self, show_target=False):
+        _, obs_target = self.get_observation()
+        self.data_logger.update_action_data(obs_target)
+        if show_target:
+            dlo_utils.draw_skeleton(
+                obs_target,
+                self.scene,
+                ROPE_RADIUS,
             )
-            self.scene.draw_debug_line(
-                start=np.array(
-                    [
-                        ee_position[0],
-                        ee_position[1],
-                        HEIGHT_OFFSET + 0.01,
-                    ]
-                ),
-                end=action_target_pos - np.array([0.0, 0.0, EE_OFFSET]),
-                radius=0.001,
-                color=(0, 0, 1, 1),  # Blue color for action direction
-            )
-            # Draw target position
-            self.scene.draw_debug_sphere(
-                pos=action_target_pos - np.array([0.0, 0.0, EE_OFFSET]),
-                radius=0.005,
-                color=(0, 1, 0, 1),
-            )
+            time.sleep(1)
 
-        return action_target_pos, total_movement_distance
-
-    def _get_random_action_inside_bounding_box(
-        self,
-        ee_position: NDArray,
-        x_bounds: tuple[float, float],
-        y_bounds: tuple[float, float],
-        debug: bool = True,
-    ) -> tuple[NDArray, float]:
-        """
-        Get a random target position for the action that remains within specified bounds.
-
-        Args:
-            particles (NDArray[np.float32]): Array of rope particle positions
-            ee_position (NDArray): Current end-effector position
-            x_bounds (tuple[float, float]): Min and max X coordinates (x_min, x_max)
-            y_bounds (tuple[float, float]): Min and max Y coordinates (y_min, y_max)
-            debug (bool): Whether to draw debug visualizations
-
-        Returns:
-            tuple[NDArray, float]: Target position for the action and movement distance
-        """
-        x_min, x_max = x_bounds
-        y_min, y_max = y_bounds
-        
-        # Generate random target position within the bounding box
-        target_x = np.random.uniform(x_min, x_max)
-        target_y = np.random.uniform(y_min, y_max)
-        
-        # Create the target position in XY plane
-        target_pos_xy = np.array([target_x, target_y])
-        
-        # Calculate movement vector and distance
-        movement_vector_xy = target_pos_xy - ee_position[:2]
-        movement_distance = np.linalg.norm(movement_vector_xy)
-        
-        # Create the full 3D target position
-        action_target_pos = np.array([
-            target_x,
-            target_y,
-            HEIGHT_OFFSET + EE_OFFSET + ROPE_RADIUS / 2,  # Fixed Z position
-        ])
-        
-        if debug:
-            self.scene.clear_debug_objects()
-            
-            # Draw current end-effector position
-            self.scene.draw_debug_sphere(
-                pos=np.array([
-                    ee_position[0],
-                    ee_position[1],
-                    HEIGHT_OFFSET + EE_OFFSET + ROPE_RADIUS / 2,
-                ]),
-                radius=0.005,
-                color=(1, 1, 0, 1),  # Yellow for current EE position
-            )
-            
-            # Draw movement vector
-            if movement_distance > 1e-6:  # Only draw if there's actual movement
-                self.scene.draw_debug_arrow(
-                    pos=np.array([
-                        ee_position[0],
-                        ee_position[1],
-                        HEIGHT_OFFSET + 0.01,
-                    ]),
-                    vec=np.array([
-                        movement_vector_xy[0],
-                        movement_vector_xy[1],
-                        0.0,  # Keep Z constant
-                    ]) * 0.8,  # Scale to show most of the movement
-                    radius=0.005,
-                    color=(0, 0, 1, 1),  # Blue for movement direction
-                )
-            
-            # Draw target position
-            self.scene.draw_debug_sphere(
-                pos=action_target_pos - np.array([0.0, 0.0, EE_OFFSET]),
-                radius=0.005,
-                color=(0, 1, 0, 1),  # Green for target position
-            )
-            
-            # Draw bounding box outline (optional - creates a wireframe box)
-            # Corner points of the bounding box at the working height
-            box_height = HEIGHT_OFFSET + 0.005
-            box_corners = [
-                [x_min, y_min, box_height],
-                [x_max, y_min, box_height],
-                [x_max, y_max, box_height],
-                [x_min, y_max, box_height],
-            ]
-            
-            # Draw bounding box edges
-            for i in range(4):
-                start_corner = np.array(box_corners[i])
-                end_corner = np.array(box_corners[(i + 1) % 4])
-                
-                self.scene.draw_debug_line(
-                    start=start_corner,
-                    end=end_corner,
-                    radius=0.002,
-                    color=(0.5, 0.5, 0.5, 0.8),  # Gray for bounding box
-                )
-        
-        return action_target_pos, movement_distance
-
-
-    def _clean_data(self, obss, acts) -> Tuple[NDArray, NDArray]:
-        obss_indices = dlo_utils.downsample_array(obss, self.action_length)
-        acts_indices = dlo_utils.downsample_array(acts, self.action_length)
-        cleaned_obss = obss[obss_indices]
-        cleaned_acts = acts[acts_indices]
-
-        return cleaned_obss, cleaned_acts
 
     def run(self):
-        observations = []
-        actions = []
-        episode_ends = []
-        steps_counter = 0
-        for episode in tqdm(range(self.n_episodes), desc="Episodes"):
-            self._reset()
-            for step in tqdm(range(self.n_actions), desc="Steps"):
-                # 1. Get the skeleton
-                rope_skeleton = dlo_utils.get_skeleton(self.rope.get_particles(),
-                                                       downsample_number=NUMBER_OF_PARTICLES,
-                                                       average_number=PARTICLES_NUMBER_FOR_POS_SMOOTHING)
+        for episode in range(self.n_episodes):
+            self.reset()
+            # Get skeleton
+            skeleton = dlo_utils.get_skeleton(self.rope.get_particles(),
+                                                downsample_number=NUMBER_OF_PARTICLES,
+                                                average_number=PARTICLES_NUMBER_FOR_POS_SMOOTHING)
+            # Select idx randomly
+            idx = np.random.randint(0, len(skeleton))
 
-                # 2. Choose a random index
-                idx = np.random.randint(0, len(rope_skeleton) - 1)  
+            # Grasp
+            self.grasp(idx)
 
-                # 3. given the idx, choose a rondom starting ee poisition, and get the proper ee orientation
-                _, ee_quat = dlo_utils.compute_pose_from_paticle_index(
-                    rope_skeleton, idx, EE_QUAT_ROTATION, EE_OFFSET
-                )
-                ee_position = self._get_random_ee_position(particles=rope_skeleton, 
-                                                           idx=idx,
-                                                           max_distance=0.1)
+            # Move randomly
+            self.random_action()
 
-                # 4. set the ee pose
-                qpos = self.franka.inverse_kinematics(
-                    link=self.end_effector,
-                    pos=ee_position,
-                    quat=ee_quat,
-                    # rot_mask=[True, True, False],
-                )
-                qpos[-2:] = 0.0  # set fingers to 0
-                self.franka.set_qpos(qpos=qpos)
+            # Release
+            # self.release() # currently not savind release data
 
-                # 5. given the idx and ee_position, choose a random action that strikes the rope through the idx
-                action_pos, distance = self._get_random_action_through_dlo(
-                                                               particles=rope_skeleton, 
-                                                               idx=idx,
-                                                               ee_position=ee_position,
-                                                               debug=True)
-                # ee_position = self.end_effector.get_pos().cpu().numpy()
-                # ee_quat = self.end_effector.get_quat().cpu().numpy()
-                # action_pos, distance =self._get_random_action_inside_bounding_box(
-                #     ee_position=ee_position,
-                #     x_bounds=(0.3, 0.6),
-                #     y_bounds=(-0.2, 0.2),
-                # )
+            # Update all previous action data with current dlo state as target
+            self.update_action_data(show_target=True)
+
+            # Save the episode
+            self.data_logger.save_episode()
                 
-                path_period = distance / VELOCITY
-                obss, acts = self._move_to_target_pose(target_pos=action_pos,
-                                                       target_quat=ee_quat,
-                                                       path_period=path_period,
-                                                       distance_tolerance=0.005,
-                                                       )                             
 
-                # 6. clean the observations and actions:
-                #   - remove data where ee_init and ee_final are very close
-                #   - sample them depending on the number of data per action
-                clean_obss, clean_acts = self._clean_data(obss, acts)
 
-                # 7. save 
-                observations.append(clean_obss)
-                actions.append(clean_acts)
-                steps_counter += len(clean_obss)
-
-                print("observations shape:", np.array(observations).shape)
-                print("actions shape:", np.array(actions).shape)
-
-                # 8. go back to 1.
-            episode_ends.append(steps_counter)
-
-        # Save observations and actions
-        observations = np.array(observations)
-        actions = np.array(actions)
-        print("obss shape:", clean_obss.shape)
-        print("acts shape:", clean_acts.shape)
-        observations = observations.reshape(-1, clean_obss.shape[-2], clean_obss.shape[-1]) # from (episodes, steps, obs_dim, 2) to (N,  obs_dim, 2)
-        actions = actions.reshape(-1, clean_acts.shape[-1]) # from (episodes, steps, act_dim, 2) to (N, 2)
-        print(f"Final observations shape: {observations.shape}")
-        print(f"Final actions shape: {actions.shape}")
-        np.savez(self.npz_save_path, observations=observations, actions=actions, episode_ends=episode_ends)
-        print(f"Saved dataset with {len(observations)} observations and actions.")
 
 if __name__ == "__main__":
-        parser = argparse.ArgumentParser()
-        parser.add_argument("-v", "--vis", action="store_true", default=False)
-        parser.add_argument("-g", "--gui", action="store_true", default=False)
-        parser.add_argument("-c", "--cpu", action="store_true", default=False)
-        parser.add_argument("-f", "--show_fps", action="store_true", default=False)
-        parser.add_argument(
-            "-e",
-            "--n_episodes",
-            type=int,
-            default=NUMBER_OF_EPISODES,
-            help="Number of episodes to run. Default is 3.",
-        )
-        parser.add_argument("-a", "--n_actions", type=int, default=10)
-        parser.add_argument("-l", "--action_length", type=int, default=10,)
-        parser.add_argument(
-            "-n",
-            "--save_name",
-            type=str,
-            default="dummy.npz",
-        )
-        args = parser.parse_args()
+    parser = argparse.ArgumentParser(description="Teleop Push Data Generator")
+    parser.add_argument("-v", "--vis", action="store_true")
+    parser.add_argument("-g", "--gui", action="store_true", help="Enable GUI mode")
+    parser.add_argument("-c", "--cpu", action="store_true", help="Run on CPU instead of GPU")
+    parser.add_argument("-f", "--show_fps", action="store_true", help="Show FPS in the viewer")
+    parser.add_argument("-e", "--n_episodes", type=int, default=NUMBER_OF_EPISODES, help="Number of episodes to run")
+    parser.add_argument("-n", "--save_name", type=str, default="dummy", help="save name")
+    args = parser.parse_args()
 
-        ########################## init ##########################
-        pushing_dataset_generator = PushingDatasetGenerator(
-            cpu=args.cpu,
-            gui=args.gui,
-            vis=args.vis,
-            show_fps=args.show_fps,
-            n_episodes=args.n_episodes,
-            n_actions=args.n_actions,
-            action_length=args.action_length,
-            save_name=args.save_name,
-        )
-        pushing_dataset_generator.run()
+    generator = PushDataGenerator(vis=args.vis, 
+                                  gui=args.gui, 
+                                  cpu=args.cpu, 
+                                  n_episodes=args.n_episodes,
+                                  show_fps=args.show_fps, 
+                                  save_name=args.save_name)
+    generator.run()

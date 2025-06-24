@@ -9,8 +9,9 @@ import json
 
 project_dir   = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # npz_filename  = os.path.join(project_dir, "npz_data", "teleop_pushing_dataset.npz")
-filename  = os.path.join(project_dir, "json_data", "dummy.jsonl")
-zarr_filename = os.path.join(project_dir, "zarr_data/teleop_pushing_dataset.zarr.zip")
+filename  = os.path.join(project_dir, "json_data", "combined_dataset.jsonl")
+zarr_filename = os.path.join(project_dir, "zarr_data/combined_pushing_dataset.zarr.zip")
+
 # ------------------------------------------------------------
 
 def create_zarr_from_npz(npz_path: str, zarr_path: str):
@@ -53,9 +54,20 @@ def create_zarr_from_npz(npz_path: str, zarr_path: str):
                     
                     if data.get("type") == "data":
                         # Extract observation and action
-                        obs = data["observation"]
-                        act = data["action"]
-                        
+                        obs_ee = np.array(data["obs_ee"])
+                        obs_dlo = np.array(data["obs_dlo"])
+                        obs_target = np.array(data["obs_target"])
+                        act = np.array(data["action"])
+
+                        obs_ee = obs_ee.flatten()
+                        obs_dlo = obs_dlo.flatten()
+                        obs_target = obs_target.flatten()
+
+
+                        obs = np.concatenate(
+                            [obs_ee, obs_dlo, obs_target], axis=-1
+                        )
+
                         observations.append(obs)
                         actions.append(act)
                         

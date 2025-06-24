@@ -25,7 +25,9 @@ class JSONLDataLogger:
 
         self.total_steps = last_episode_idx       
         self.episode_current_step = 0
+        self.action_current_step = 0
         self.episode_data = []
+        self.action_data = []
         self.file = None
         
     def initialize_file(self):
@@ -34,24 +36,44 @@ class JSONLDataLogger:
         
     
     
-    def append_data(self, observation, action):
+    def append_data(self, obs_ee, obs_dlo, obs_target, action):
         """Append observation and action to file"""
         data = {
             "type": "data",
-            "observation": observation.tolist(),  # Convert numpy array to list
+            "obs_ee": obs_ee.tolist(),  # Convert numpy array to list
+            "obs_dlo": obs_dlo.tolist(),  # Convert numpy array to list
+            "obs_target": obs_target.tolist(),  # Convert
             "action": action.tolist()
         }
         self.episode_data.append(data)
+        self.action_data.append(data)
         self.episode_current_step += 1
+        self.action_current_step += 1
 
     def delete_episode_data(self):
         self.episode_data = []  # Clear the episode data after saving
         self.episode_current_step = 0
 
+    def delete_action_data(self):
+        self.action_data = []
+        self.action_current_step = 0
+
+    def update_action_data(self, obs_target):
+        """Once action is finished, update the action data with the target observation"""
+        print("Updating action data with target observation...")
+        if self.action_data:
+            action_data_length = len(self.action_data)
+            print(f"Action data length: {action_data_length}")
+            # Update the last action data with the target observation
+            for i in range(1, action_data_length + 1):
+                self.action_data[-i]["obs_target"] = obs_target.tolist()
+        else:
+            print("No action data to update.")
+        self.delete_action_data()
+
 
     def save_episode(self):
         """Mark the end of an episode and save all data"""
-
         # Save episode data
         for data in self.episode_data:
             self.file.write(json.dumps(data) + '\n')
@@ -72,7 +94,7 @@ class JSONLDataLogger:
         """Close the file"""
         if self.file:
             self.file.close()
-            print(f"Closed JSONL file '{self.save_name}.jsonl' with {self.total_steps} total steps")
+            print(f"Closed JSONL file '{self.save_name} with {self.total_steps} total steps")
 
 
 

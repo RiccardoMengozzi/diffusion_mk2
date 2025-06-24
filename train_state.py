@@ -19,9 +19,9 @@ from diffusion_mk2.dataset.pusht_state_dataset import PushTStateDataset
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 hyperparameters = {
-    "obs_dim": 62,
+    "obs_dim": 95,
     "obs_horizon": 2,
-    "action_dim": 2,
+    "action_dim": 5,
     "action_horizon": 8,
     "pred_horizon": 16,
     "num_diffusion_iters": 100,
@@ -34,7 +34,7 @@ hyperparameters = {
     "device": torch.device("cuda"),  # Will default to CUDA if available
     "model_save_path": "",
     "checkpoint_save_interval": 1,  # Save checkpoint every N epochs
-    "dataset_path": os.path.join(PROJECT_DIR, "zarr_data", "pushing_dataset.zarr.zip"),
+    "dataset_path": os.path.join(PROJECT_DIR, "zarr_data", "combined_pushing_dataset.zarr.zip"),
 
     # wandb
     "project_name": "diffusion_model",
