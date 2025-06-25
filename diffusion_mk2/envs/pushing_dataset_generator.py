@@ -3,17 +3,13 @@ import argparse
 import numpy as np
 import genesis as gs
 import time
-import colorsys
-from pynput import keyboard
+from tqdm import tqdm
 from genesis.engine.entities import RigidEntity, MPMEntity
 from genesis.engine.entities.rigid_entity import RigidLink
-from diffusion_mk2.utils.dlo_shapes import U_SHAPE, S_SHAPE
 import diffusion_mk2.utils.dlo_computations as dlo_utils
 from diffusion_mk2.envs.teleop.data_logger import JSONLDataLogger
-from diffusion_mk2.envs.teleop.monitor import Monitor
 from scipy.spatial.transform import Rotation as R
 
-from rich.live import Live
 
 
 
@@ -77,7 +73,7 @@ class PushDataGenerator():
 
         gs.init(
             backend=gs.cpu if self.cpu else gs.gpu,
-            logging_level="warning",
+            logging_level="error",
         )
 
         ########################## create a scene ##########################
@@ -390,7 +386,7 @@ class PushDataGenerator():
 
 
     def run(self):
-        for episode in range(self.n_episodes):
+        for episode in tqdm(range(self.n_episodes)):
             self.reset()
             # Get skeleton
             skeleton = dlo_utils.get_skeleton(self.rope.get_particles(),

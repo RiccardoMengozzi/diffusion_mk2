@@ -60,10 +60,8 @@ class JSONLDataLogger:
 
     def update_action_data(self, obs_target):
         """Once action is finished, update the action data with the target observation"""
-        print("Updating action data with target observation...")
         if self.action_data:
             action_data_length = len(self.action_data)
-            print(f"Action data length: {action_data_length}")
             # Update the last action data with the target observation
             for i in range(1, action_data_length + 1):
                 self.action_data[-i]["obs_target"] = obs_target.tolist()
