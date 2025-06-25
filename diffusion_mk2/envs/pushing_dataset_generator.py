@@ -222,11 +222,11 @@ class PushDataGenerator():
         finger_qpos = self.franka.get_qpos().cpu().numpy()[-1]
         obs_ee = np.array([pos_ee[0], pos_ee[1], pos_ee[2], theta, finger_qpos])
 
-        self.scene.draw_debug_sphere(
-            pos=np.array([obs_ee[0], obs_ee[1], obs_ee[2] - EE_OFFSET]),
-            radius=0.001,
-            color=(1, 0, 0, 1),  # Red color for end effector
-        )
+        # self.scene.draw_debug_sphere(
+        #     pos=np.array([obs_ee[0], obs_ee[1], obs_ee[2] - EE_OFFSET]),
+        #     radius=0.001,
+        #     color=(1, 0, 0, 1),  # Red color for end effector
+        # )
         obs_dlo = dlo_utils.get_skeleton(self.rope.get_particles(),
                                             downsample_number=NUMBER_OF_PARTICLES,
                                             average_number=PARTICLES_NUMBER_FOR_POS_SMOOTHING)
@@ -409,7 +409,7 @@ class PushDataGenerator():
             # self.release() # currently not savind release data
 
             # Update all previous action data with current dlo state as target
-            self.update_action_data(show_target=True)
+            self.update_action_data(show_target=False)
 
             # Save the episode
             self.data_logger.save_episode()
