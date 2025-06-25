@@ -25,15 +25,15 @@ hyperparameters = {
     "action_horizon": 8,
     "pred_horizon": 16,
     "num_diffusion_iters": 100,
-    "num_epochs": 1,
-    "batch_size": 1024,
+    "num_epochs": 4000,
+    "batch_size": 2048,
     "lr": 1e-4,
     "weight_decay": 1e-6,
     "warmup_steps": 500,
     "ema_power": 0.75,
     "device": torch.device("cuda"),  # Will default to CUDA if available
     "model_save_path": "",
-    "checkpoint_save_interval": 1,  # Save checkpoint every N epochs
+    "checkpoint_save_interval": 100,  # Save checkpoint every N epochs
     "dataset_path": os.path.join(PROJECT_DIR, "zarr_data", "combined_pushing_dataset.zarr.zip"),
 
     # wandb
@@ -73,7 +73,7 @@ class DiffusionTrainer:
             config=config,
             project=self.project_name,
             entity=self.entity,
-            mode="disabled"
+            mode="online"
         )
         if config.get("model_save_path") == "":
             # Default model save path if not specified
@@ -225,7 +225,7 @@ class DiffusionTrainer:
                 
                 # Save checkpoint at specified intervals
                 if (epoch_idx + 1) % self.CHECKPOINT_SAVE_INTERVAL == 0:
-                    self.save_checkpoint(epoch_idx, avg_loss)
+                    self.save_checkpoint(epoch_idx + 1, avg_loss)
 
         # After all epochs: save final model
         self.save_final_model()
