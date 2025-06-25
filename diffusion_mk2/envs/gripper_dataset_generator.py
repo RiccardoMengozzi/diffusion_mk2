@@ -33,7 +33,7 @@ ROPE_BASE_POSITION = np.array([0.5, 0.0, HEIGHT_OFFSET + ROPE_RADIUS])
 NUMBER_OF_PARTICLES = 15
 PARTICLES_NUMBER_FOR_POS_SMOOTHING = 10
 
-ROPE_RESET_INTERVAL = 3 # episodes
+ROPE_RESET_INTERVAL = 5 # episodes
 
 EE_VELOCITY = 0.02
 EE_ANG_VELOCITY = 0.2
@@ -240,6 +240,7 @@ class PushDataGenerator():
     def get_action(self):
         pos_ee = self.end_effector.get_pos().cpu().numpy()
         theta = R.from_quat(self.end_effector.get_quat().cpu().numpy()).as_euler('xyz')[0]
+        print(f"quaternion: {self.end_effector.get_quat().cpu().numpy()}")
         finger_qpos = self.franka.get_qpos().cpu().numpy()[-1]
 
         action = np.array([pos_ee[0], pos_ee[1], pos_ee[2], theta, finger_qpos])
@@ -346,6 +347,7 @@ class PushDataGenerator():
             qpos=qpos,
             path_period=0.5,
             gripper_open=True,  # Open the gripper
+            save_data=True,  # Save data during this action
         )
 
         # Move up
@@ -354,6 +356,7 @@ class PushDataGenerator():
             target_quat=self.end_effector.get_quat().cpu().numpy(),
             path_period=0.5,
             gripper_open=True,  # Keep the gripper open
+            save_data=True,  # Save data during this action
         )
 
     def random_action(self):
@@ -413,7 +416,7 @@ class PushDataGenerator():
             self.random_action()
 
             # Release
-            # self.release() # currently not savind release data
+            self.release() # currently not savind release data
 
             # Update all previous action data with current dlo state as target
             self.update_action_data(show_target=False)

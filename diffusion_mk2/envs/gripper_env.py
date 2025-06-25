@@ -3,23 +3,25 @@ import argparse
 import numpy as np
 import genesis as gs
 import time
+import random
 from tqdm import tqdm
+import collections
+import torch
 from genesis.engine.entities import RigidEntity, MPMEntity
 from genesis.engine.entities.rigid_entity import RigidLink
 import diffusion_mk2.utils.dlo_computations as dlo_utils
+import diffusion_mk2.utils.gs_utils as gs_utils
 from scipy.spatial.transform import Rotation as R
 from diffusion_mk2.utils.dlo_shapes import U_SHAPE, S_SHAPE
+from diffusion_mk2.inference.inference_state import InferenceState
 
-SHAPES = {
-    "U_SHAPE": U_SHAPE,
-    "S_SHAPE": S_SHAPE
-    }
+
+SHAPES = [U_SHAPE, S_SHAPE]
 
 
 PROJECT_FOLDER = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 NUMBER_OF_EPISODES = 3
 NUMBER_OF_ACTIONS_PER_EPISODE = 8 # This is not directly used in the teleop script, but kept for consistency
-ACTION_TIME = 2.0  # seconds (for 256 batch size)
 VELOCITY = 0.05  # m/s
 DT = 1e-2  # simulation time step
 MPM_GRID_DENSITY = 256
@@ -42,6 +44,8 @@ SAVE_DATA_INTERVAL = 3 # every 3 steps
 CLOSE_GRIPPER_POSITION = 0.00   
 OPEN_GRIPPER_POSITION = 0.01  
 
+
+MODEL_PATH = os.path.join(PROJECT_FOLDER, "weights", "northern-donkey-26_model.pt")
 
 
 
@@ -164,7 +168,15 @@ class GripperEnv():
         )
 
         self.initial_pose = np.array([0.45, 0.0, HEIGHT_OFFSET + EE_OFFSET + EE_Z, 0.0, 0.707, 0.707, 0.0])
+        self.target = random.choice(SHAPES)
 
+        #### Initialize model and observation deque ####
+        self.model = InferenceState(MODEL_PATH, device=gs.device)
+        obs_horizon = self.model.obs_horizon
+        
+        # Initialize observation buffer
+        obs = self.get_observation()
+        self.obs_deque = collections.deque([obs] * obs_horizon, maxlen=obs_horizon)
 
 
     def _step(self):
@@ -180,7 +192,8 @@ class GripperEnv():
         self.scene.clear_debug_objects()
 
         # Choose new target
-        self.target = 
+        self.target = random.choice(SHAPES)
+        dlo_utils.draw_skeleton(self.target, self.scene, ROPE_RADIUS)
 
         # Place robot aboce centre of the rope
         skeleton = dlo_utils.get_skeleton(self.rope.get_particles(),
@@ -218,13 +231,22 @@ class GripperEnv():
                                             downsample_number=NUMBER_OF_PARTICLES,
                                             average_number=PARTICLES_NUMBER_FOR_POS_SMOOTHING)
         obs_target = self.target
-        return obs_ee, obs_dlo, obs_target
+
+        obs_ee = np.array(obs_ee).flatten()
+        obs_dlo = np.array(obs_dlo).flatten()
+        obs_target = np.array(obs_target).flatten()
+        obs = np.concatenate(
+                [obs_ee, obs_dlo, obs_target], axis=-1
+                )
+
+
+        return obs
  
     def move(self, 
              target_pos=None,
              target_quat=None,
              qpos=None,
-             gripper_open=False,
+             gripper_open=None,
              force_control=False,
              force_intensity=1,
              path_period=0.5,
@@ -249,10 +271,12 @@ class GripperEnv():
             )
 
         # Control the gripper
-        if not gripper_open:
-            qpos[-2:] = CLOSE_GRIPPER_POSITION
-        else:
-            qpos[-2:] = OPEN_GRIPPER_POSITION
+        if gripper_open is not None:
+            if not gripper_open:
+                qpos[-2:] = CLOSE_GRIPPER_POSITION
+            else:
+                qpos[-2:] = OPEN_GRIPPER_POSITION
+
 
         # Control the robot along the path
         for p in path:
@@ -267,6 +291,38 @@ class GripperEnv():
             # Check if the robot has reached the target position
             if np.linalg.norm(qpos.cpu().numpy() - self.franka.get_qpos().cpu().numpy()) < tolerance:
                 break
+
+    def do_action(self, action):
+        for a in action:
+            target_pos = a[:3]
+
+            q_old = R.from_euler('xyz', [a[3], 0, 0]).as_quat()
+            # q_old ≈ [0.77541212, 0., 0., 0.63145549]
+
+            # 2) costruisci l’asse usando (x_old, w_old):
+            v = np.array([0.0, q_old[0], q_old[3]])      # [0, 0.7754, 0.6315]
+            u = v / np.linalg.norm(v)                    # asse unitario
+
+            # 3) crea il nuovo quaternion con angle = π rad
+            target_quat = R.from_rotvec(np.pi * u).as_quat()
+            
+            target_gripper = a[4]
+
+
+            print(f"quat =  {target_quat}, theta = {a[3]}")
+
+            qpos = self.franka.inverse_kinematics(
+                link=self.end_effector,
+                pos=target_pos,
+                quat=target_quat,
+            )
+            qpos[-2:] = torch.tensor([target_gripper, target_gripper], dtype=qpos.dtype, device=qpos.device)
+
+
+            self.move(
+                qpos=qpos,
+                path_period=0.1,
+            )
 
     def release(self):
         """Release the grasped object."""
@@ -292,26 +348,28 @@ class GripperEnv():
             self.reset()
             for action in tqdm(range(self.n_actions)):
                 # Get observation
-                obs_ee, obs_dlo, obs_target = self.get_observation()
+                obs = self.get_observation()
 
-                # Select idx randomly
-                idx = np.random.randint(0, len(skeleton))
+                self.obs_deque.append(obs)
+                obs = np.stack(self.obs_deque)
+                obs = obs.reshape(self.model.obs_horizon, -1)
 
-                # Grasp
-                self.grasp(idx)
+                pred_action, pred_actions = self.model.run_inference(
+                    observation=obs,
+                )
+                # Visualize denoising
+                # for a in pred_actions:
+                #     self.scene.clear_debug_objects()
+                #     self.draw_action(a)  # Fixed method call
 
-                # Move randomly
-                self.random_action()
+                # Loop through each waypoint in the predicted action
+                gs_utils.draw_action_trajectory(self.scene, pred_action, EE_OFFSET, raduis=0.001)
 
-                # Release
-                # self.release() # currently not savind release data
-
-                # Update all previous action data with current dlo state as target
-                self.update_action_data(show_target=False)
-
-                # Save the episode
-                self.data_logger.save_episode()
+                self.do_action(pred_action)
                 
+            # Release
+            self.release() 
+
 
 
 
