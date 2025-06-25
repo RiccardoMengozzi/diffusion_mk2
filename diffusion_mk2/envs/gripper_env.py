@@ -7,11 +7,13 @@ from tqdm import tqdm
 from genesis.engine.entities import RigidEntity, MPMEntity
 from genesis.engine.entities.rigid_entity import RigidLink
 import diffusion_mk2.utils.dlo_computations as dlo_utils
-from diffusion_mk2.envs.teleop.data_logger import JSONLDataLogger
 from scipy.spatial.transform import Rotation as R
+from diffusion_mk2.utils.dlo_shapes import U_SHAPE, S_SHAPE
 
-
-
+SHAPES = {
+    "U_SHAPE": U_SHAPE,
+    "S_SHAPE": S_SHAPE
+    }
 
 
 PROJECT_FOLDER = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -43,12 +45,13 @@ OPEN_GRIPPER_POSITION = 0.01
 
 
 
-class PushDataGenerator():
+class GripperEnv():
     def __init__(self, 
                  vis=False, 
                  gui=False, 
                  cpu=False,
                  n_episodes=NUMBER_OF_EPISODES,
+                 n_actions=NUMBER_OF_ACTIONS_PER_EPISODE,
                  show_fps=False, 
                  save_name="dummy"):
         
@@ -56,19 +59,9 @@ class PushDataGenerator():
         self.gui = gui
         self.cpu = cpu
         self.n_episodes = n_episodes
+        self.n_actions = n_actions
         self.show_fps = show_fps
-
-        save_path = os.path.join(PROJECT_FOLDER, "json_data")
-        if not os.path.exists(save_path):
-            os.makedirs(save_path, exist_ok=True)
-        self.data_logger = JSONLDataLogger(save_path, save_name + ".jsonl")
-        self.data_logger.initialize_file()
-
-        self.current_episode = 0
-        self.total_episodes = 0
         self.real_time_factor = 0.0
-
-        self.step_counter = 0
 
 
         gs.init(
@@ -173,9 +166,6 @@ class PushDataGenerator():
         self.initial_pose = np.array([0.45, 0.0, HEIGHT_OFFSET + EE_OFFSET + EE_Z, 0.0, 0.707, 0.707, 0.0])
 
 
-        self.episode_observations = []
-        self.episode_actions = []
-
 
     def _step(self):
         start_time = time.time()
@@ -188,6 +178,9 @@ class PushDataGenerator():
     def reset(self):
         """Reset the environment for a new episode."""
         self.scene.clear_debug_objects()
+
+        # Choose new target
+        self.target = 
 
         # Place robot aboce centre of the rope
         skeleton = dlo_utils.get_skeleton(self.rope.get_particles(),
@@ -210,8 +203,6 @@ class PushDataGenerator():
         self._step()
 
 
-
-
     def get_observation(self):
         pos_ee = self.end_effector.get_pos().cpu().numpy()
         theta = R.from_quat(self.end_effector.get_quat().cpu().numpy()).as_euler('xyz')[0] # dont ask why [0], but it works
@@ -226,16 +217,8 @@ class PushDataGenerator():
         obs_dlo = dlo_utils.get_skeleton(self.rope.get_particles(),
                                             downsample_number=NUMBER_OF_PARTICLES,
                                             average_number=PARTICLES_NUMBER_FOR_POS_SMOOTHING)
-        return obs_ee, obs_dlo
-
-    def get_action(self):
-        pos_ee = self.end_effector.get_pos().cpu().numpy()
-        theta = R.from_quat(self.end_effector.get_quat().cpu().numpy()).as_euler('xyz')[0]
-        finger_qpos = self.franka.get_qpos().cpu().numpy()[-1]
-
-        action = np.array([pos_ee[0], pos_ee[1], pos_ee[2], theta, finger_qpos])
-        return action
-
+        obs_target = self.target
+        return obs_ee, obs_dlo, obs_target
  
     def move(self, 
              target_pos=None,
@@ -245,8 +228,7 @@ class PushDataGenerator():
              force_control=False,
              force_intensity=1,
              path_period=0.5,
-             tolerance=1e-7,
-             save_data=False):
+             tolerance=1e-7):
         """ Primitive move function """
         # If I already provide qpos, i don't compute it
         if qpos is None:
@@ -274,9 +256,6 @@ class PushDataGenerator():
 
         # Control the robot along the path
         for p in path:
-            # If we are saving data, get the observation
-            if self.step_counter % SAVE_DATA_INTERVAL == 0 and save_data:
-                obs_ee, obs_dlo = self.get_observation()
 
             self.franka.control_dofs_position(p[:-2], self.motors_dof)
             if force_control:
@@ -285,48 +264,9 @@ class PushDataGenerator():
                 self.franka.control_dofs_position(p[-2:], self.fingers_dof)
             self._step()
 
-            # If we are saving data, get the action and append data
-            if self.step_counter % SAVE_DATA_INTERVAL == 0 and save_data:
-                action = self.get_action()
-                self.data_logger.append_data(obs_ee, obs_dlo, obs_dlo, action) #target will be changed at the end of the action
-            
-            # Update global step counter
-            self.step_counter += 1
-
             # Check if the robot has reached the target position
             if np.linalg.norm(qpos.cpu().numpy() - self.franka.get_qpos().cpu().numpy()) < tolerance:
                 break
-
-
-    def grasp(self, idx):
-        particles = dlo_utils.get_skeleton(self.rope.get_particles(),
-                                            downsample_number=NUMBER_OF_PARTICLES,
-                                            average_number=PARTICLES_NUMBER_FOR_POS_SMOOTHING)
-
-        # Get the target pose based on the index of the particle
-        target_pos, target_quat = dlo_utils.compute_pose_from_paticle_index(
-            particles,
-            idx,
-            ee_quat_offset=EE_QUAT_ROTATION,
-            ee_offset=EE_OFFSET,
-        )
-
-        self.move(
-            target_pos=target_pos,
-            target_quat=target_quat,
-            path_period=1.0,  
-            gripper_open=True,  
-            save_data=True,  # Save data during this action
-        )
-
-        # Close the gripper
-        self.move(
-            qpos=self.franka.get_qpos(),
-            path_period=0.5,
-            gripper_open=False,  # Close the gripper
-            force_control=True,  # Use force control to grasp
-            save_data=True,  # Save data during this action
-        )
 
     def release(self):
         """Release the grasped object."""
@@ -347,68 +287,30 @@ class PushDataGenerator():
             gripper_open=True,  # Keep the gripper open
         )
 
-    def random_action(self):
-        """Generate a random action for the robot."""
-        # Randomly choose a delta for movement and rotation
-        current_pos = self.end_effector.get_pos().cpu().numpy()
-        current_quat = self.end_effector.get_quat().cpu().numpy()
-
-        delta_xy = np.random.uniform(-0.05, 0.05, size=2)
-        delta_yaw = np.random.uniform(-np.pi / 4, np.pi / 4)  # Random yaw rotation
-
-        target_pos = [current_pos[0] + delta_xy[0], current_pos[1] + delta_xy[1], current_pos[2]]
-
-        current_R = (R.from_quat(current_quat)).as_matrix()
-        delta_R = R.from_euler("xyz", [delta_yaw, 0.0, 0.0]).as_matrix()
-        target_R = current_R @ delta_R
-
-        target_quat = (R.from_matrix(target_R)).as_quat()
-
-        # Move to the target position
-        self.move(
-            target_pos=target_pos,
-            target_quat=target_quat,
-            path_period=1.0, # only one step
-            gripper_open=False,
-            save_data=True,  # Save data during this action
-        )
-
-    def update_action_data(self, show_target=False):
-        _, obs_target = self.get_observation()
-        self.data_logger.update_action_data(obs_target)
-        if show_target:
-            dlo_utils.draw_skeleton(
-                obs_target,
-                self.scene,
-                ROPE_RADIUS,
-            )
-            time.sleep(1)
-
-
     def run(self):
         for episode in tqdm(range(self.n_episodes)):
             self.reset()
-            # Get skeleton
-            skeleton = dlo_utils.get_skeleton(self.rope.get_particles(),
-                                                downsample_number=NUMBER_OF_PARTICLES,
-                                                average_number=PARTICLES_NUMBER_FOR_POS_SMOOTHING)
-            # Select idx randomly
-            idx = np.random.randint(0, len(skeleton))
+            for action in tqdm(range(self.n_actions)):
+                # Get observation
+                obs_ee, obs_dlo, obs_target = self.get_observation()
 
-            # Grasp
-            self.grasp(idx)
+                # Select idx randomly
+                idx = np.random.randint(0, len(skeleton))
 
-            # Move randomly
-            self.random_action()
+                # Grasp
+                self.grasp(idx)
 
-            # Release
-            # self.release() # currently not savind release data
+                # Move randomly
+                self.random_action()
 
-            # Update all previous action data with current dlo state as target
-            self.update_action_data(show_target=False)
+                # Release
+                # self.release() # currently not savind release data
 
-            # Save the episode
-            self.data_logger.save_episode()
+                # Update all previous action data with current dlo state as target
+                self.update_action_data(show_target=False)
+
+                # Save the episode
+                self.data_logger.save_episode()
                 
 
 
@@ -420,13 +322,14 @@ if __name__ == "__main__":
     parser.add_argument("-c", "--cpu", action="store_true", help="Run on CPU instead of GPU")
     parser.add_argument("-f", "--show_fps", action="store_true", help="Show FPS in the viewer")
     parser.add_argument("-e", "--n_episodes", type=int, default=NUMBER_OF_EPISODES, help="Number of episodes to run")
+    parser.add_argument("-a", "--n_actions", type=int, default=NUMBER_OF_ACTIONS_PER_EPISODE, help="Number of actions per episode")
     parser.add_argument("-n", "--save_name", type=str, default="dummy", help="save name")
     args = parser.parse_args()
 
-    generator = PushDataGenerator(vis=args.vis, 
-                                  gui=args.gui, 
-                                  cpu=args.cpu, 
-                                  n_episodes=args.n_episodes,
-                                  show_fps=args.show_fps, 
-                                  save_name=args.save_name)
-    generator.run()
+    gripper_env = GripperEnv(vis=args.vis, 
+                             gui=args.gui, 
+                             cpu=args.cpu, 
+                             n_episodes=args.n_episodes,
+                             show_fps=args.show_fps, 
+                             save_name=args.save_name)
+    gripper_env.run()
