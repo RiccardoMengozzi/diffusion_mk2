@@ -1,0 +1,68 @@
+inference:
+  model_path: weights/northern-donkey-26_model.pt
+  number_of_episodes: 10
+  number_of_actions: 10
+
+simulation:
+  dt: 0.01  # simulation time step
+  substeps: 40
+  cpu: false
+  show_fps: false
+  show_real_time_factor: false
+
+  viewer:
+    active: true
+    resolution: [1080, 720]
+    position: [0.5, 0.0, 1.4]
+    lookat: [0.5, 0.0, 0.0]
+    fov: 80
+    refresh_rate: 30
+    max_FPS: 240
+
+  camera:
+    gui: true
+
+
+
+entities:
+  table:
+    position: [0.0, 0.0, 0.0]
+    orientation: [0.0, 0.0, 90.0]
+    height: 0.7005
+    scale: 1.0
+
+
+  franka:
+    position: [0.0 ,0.0, 0.7005]
+    orientation: [0.0, 0.0, 0.0]
+    gravity_compensation: 1.0
+
+    end_effector:
+      offset: 0.105
+      z_lift: 0.07
+      quat_rotation: [0.0, 0.0, -1.0, 0.0]
+      gripper_close_position: 0.0
+      gripper_open_position: 0.01
+      friction: 5.0
+      needs_coup: True
+      coup_friction: 5.0
+      sdf_cell_size: 0.005
+       
+
+  dlo:
+    mpm_grid_density: 256
+    mpm_lower_bound: [0.2, -0.3, 0.6505]
+    mpm_upper_bound: [0.8, 0.3, 0.8005]
+    length: 0.2
+    radius: 0.003
+    position: [0.5, 0.0, 0.7035]
+    orientation: [90.0, 0.0, 0.0]
+    number_of_particles: 15
+    particles_smoothing: 10
+    E: 50000
+    nu: 0.45
+    rho: 2000
+    sampler: "pbs"
+
+
+
