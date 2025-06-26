@@ -13,3 +13,17 @@ def next_gradient_color(
     # Convert back to RGB
     r2, g2, b2 = colorsys.hsv_to_rgb(h, s, v)
     return (r2, g2, b2, a)
+
+def load_yaml(file_path: str):
+    """
+    Load a YAML file and return its content.
+    
+    Args:
+        file_path (str): Path to the YAML file.
+        
+    Returns:
+        dict: Content of the YAML file.
+    """
+    import yaml
+    with open(file_path, 'r') as file:
+        return yaml.safe_load(file)
