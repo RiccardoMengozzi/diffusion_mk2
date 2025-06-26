@@ -58,7 +58,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--n_instances", type=int, default=4, help="Number of instances to run")
     parser.add_argument("-e", "--n_episodes", type=int, default=3, help="Episodes per instance")
-    parser.add_argument("--script_path", type=str, default="pushing_dataset_generator.py", help="Path to the generator script")
+    parser.add_argument("--script_path", type=str, default="gripper_dataset_generator.py", help="Path to the generator script")
     parser.add_argument("-v", "--vis", action="store_true", help="Enable visualization")
     parser.add_argument("-g", "--gui", action="store_true", help="Enable GUI")
     parser.add_argument("-c", "--cpu", action="store_true", help="Use CPU instead of GPU")

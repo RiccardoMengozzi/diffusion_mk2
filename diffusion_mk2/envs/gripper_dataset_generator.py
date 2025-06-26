@@ -37,7 +37,7 @@ ROPE_RESET_INTERVAL = 5 # episodes
 
 EE_VELOCITY = 0.02
 EE_ANG_VELOCITY = 0.2
-SAVE_DATA_INTERVAL = 3 # every 3 steps
+SAVE_DATA_INTERVAL = 6 # every 3 steps
 CLOSE_GRIPPER_POSITION = 0.00   
 OPEN_GRIPPER_POSITION = 0.01  
 
@@ -240,7 +240,6 @@ class PushDataGenerator():
     def get_action(self):
         pos_ee = self.end_effector.get_pos().cpu().numpy()
         theta = R.from_quat(self.end_effector.get_quat().cpu().numpy()).as_euler('xyz')[0]
-        print(f"quaternion: {self.end_effector.get_quat().cpu().numpy()}")
         finger_qpos = self.franka.get_qpos().cpu().numpy()[-1]
 
         action = np.array([pos_ee[0], pos_ee[1], pos_ee[2], theta, finger_qpos])
@@ -380,7 +379,7 @@ class PushDataGenerator():
         self.move(
             target_pos=target_pos,
             target_quat=target_quat,
-            path_period=1.0, # only one step
+            path_period=1.0, 
             gripper_open=False,
             save_data=True,  # Save data during this action
         )
