@@ -9,7 +9,7 @@ from genesis.engine.entities import RigidEntity, MPMEntity
 from genesis.engine.entities.rigid_entity import RigidLink
 from diffusion_mk2.utils.dlo_shapes import U_SHAPE, S_SHAPE
 import diffusion_mk2.utils.dlo_computations as dlo_utils
-from diffusion_mk2.dataset.data_logger import JSONLDataLogger
+from diffusion_mk2.dataset.data_logger import JSONLDataLoggerDiffusion
 from diffusion_mk2.envs.diffusion.teleop.monitor import Monitor
 from scipy.spatial.transform import Rotation as R
 
@@ -18,7 +18,7 @@ from rich.live import Live
 
 
 
-PROJECT_FOLDER = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+PROJECT_FOLDER = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
 NUMBER_OF_EPISODES = 3
 NUMBER_OF_ACTIONS_PER_EPISODE = 8 # This is not directly used in the teleop script, but kept for consistency
 ACTION_TIME = 2.0  # seconds (for 256 batch size)
@@ -28,7 +28,7 @@ MPM_GRID_DENSITY = 256
 SUBSTEPS = 40
 TABLE_HEIGHT = 0.7005
 HEIGHT_OFFSET = TABLE_HEIGHT
-EE_OFFSET = 0.108
+EE_OFFSET = 0.106
 EE_Z = 0.04
 EE_QUAT_ROTATION = np.array([0, 0, -1, 0])
 ROPE_LENGTH = 0.2
@@ -57,7 +57,7 @@ class TeleopPushDataGenerator():
         save_path = os.path.join(PROJECT_FOLDER, "json_data")
         if not os.path.exists(save_path):
             os.makedirs(save_path, exist_ok=True)
-        self.data_logger = JSONLDataLogger(save_path, save_name + ".jsonl")
+        self.data_logger = JSONLDataLoggerDiffusion(save_path, save_name + ".jsonl")
         self.data_logger.initialize_file()
 
         self.monitor = Monitor()
