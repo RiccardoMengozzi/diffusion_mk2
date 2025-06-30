@@ -8,23 +8,13 @@ import json
 # ------------------------------------------------------------
 
 project_dir   = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-filename  = os.path.join(project_dir, "json_data", "dummy.jsonl")
+filename  = os.path.join(project_dir, "json_data", "simple_fc_combined.jsonl")
 zarr_filename = os.path.join(project_dir, "zarr_data/shape_prediction.zarr.zip")
 
 # ------------------------------------------------------------
 
 def create_zarr_from_jsonl(npz_path: str, zarr_path: str):
-    """
-    Reads 'observations', 'actions', and 'episode_ends' from the given .npz,
-    then writes them into a compressed Zarr-Zip store with this structure:
 
-    my_data.zarr.zip/
-      ├── data/
-      │    ├── state          (shape: [N, obs_dim],   dtype=float32)
-      │    └── action         (shape: [N, action_dim],dtype=float32)
-      └── meta/
-           └── episode_ends   (shape: [E],            dtype=int64)
-    """
     # 1) Load arrays from .npz or .jsonl
     initial_shapes = []
     final_shapes = []
@@ -42,6 +32,7 @@ def create_zarr_from_jsonl(npz_path: str, zarr_path: str):
                         initial_shape = np.array(data["initial_shape"])
                         final_shape = np.array(data["final_shape"])
                         action = np.array(data["action"])
+                        
 
                         initial_shape = initial_shape.flatten()
                         final_shape = final_shape.flatten()
@@ -50,6 +41,7 @@ def create_zarr_from_jsonl(npz_path: str, zarr_path: str):
                         initial_shapes.append(initial_shape)
                         final_shapes.append(final_shape)
                         actions.append(action)
+                    
                     
                         
                 except json.JSONDecodeError as e:
@@ -61,7 +53,7 @@ def create_zarr_from_jsonl(npz_path: str, zarr_path: str):
 
         initial_shapes = np.array(initial_shapes, dtype=np.float32)
         final_shapes = np.array(final_shapes, dtype=np.float32)
-        actions = np.array(actions, dtype=np.int64)
+        actions = np.array(actions, dtype=np.float32)
 
     #### CREATE ZARR ####
     N_obs = initial_shapes.shape[0]
@@ -75,7 +67,7 @@ def create_zarr_from_jsonl(npz_path: str, zarr_path: str):
     #    Here obs_dim = (O+1)*2
     initial_shapes = initial_shapes.reshape(N_obs, -1).astype("float32")
     final_shapes = final_shapes.reshape(N_obs, -1).astype("float32")
-    actions  = actions.astype("int64")
+    actions  = actions.astype("float32")
 
     # 3) Remove any existing Zarr‐Zip so we can create afresh
     if os.path.exists(zarr_path):
