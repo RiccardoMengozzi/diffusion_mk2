@@ -9,8 +9,8 @@ from genesis.engine.entities import RigidEntity, MPMEntity
 from genesis.engine.entities.rigid_entity import RigidLink
 from diffusion_mk2.utils.dlo_shapes import U_SHAPE, S_SHAPE
 import diffusion_mk2.utils.dlo_computations as dlo_utils
-from diffusion_mk2.envs.teleop.data_logger import JSONLDataLogger
-from diffusion_mk2.envs.teleop.monitor import Monitor
+from diffusion_mk2.dataset.data_logger import JSONLDataLogger
+from diffusion_mk2.envs.diffusion.teleop.monitor import Monitor
 from scipy.spatial.transform import Rotation as R
 
 from rich.live import Live

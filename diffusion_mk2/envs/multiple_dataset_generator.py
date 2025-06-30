@@ -16,6 +16,7 @@ def run_multiple_generators(
 ):
     """Launch multiple instances of the dataset generator."""
     script_path = os.path.join(PROJECT_FOLDER, "diffusion_mk2", "envs", script_path)
+    print(f"Using script: {script_path}")
     processes = []
     
     for i in range(n_instances):

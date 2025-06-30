@@ -9,8 +9,8 @@ import json
 
 project_dir   = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # npz_filename  = os.path.join(project_dir, "npz_data", "teleop_pushing_dataset.npz")
-filename  = os.path.join(project_dir, "json_data", "combined_dataset.jsonl")
-zarr_filename = os.path.join(project_dir, "zarr_data/combined_pushing_dataset.zarr.zip")
+filename  = os.path.join(project_dir, "json_data", "teleop.jsonl")
+zarr_filename = os.path.join(project_dir, "zarr_data/teleop.zarr.zip")
 
 # ------------------------------------------------------------
 

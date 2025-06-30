@@ -18,7 +18,7 @@ from diffusion_mk2.inference.inference_state import InferenceState
 
 
 SHAPES = [U_SHAPE, S_SHAPE]
-PROJECT_FOLDER = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+PROJECT_FOLDER = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
 class GripperEnv():
     def __init__(self, args):

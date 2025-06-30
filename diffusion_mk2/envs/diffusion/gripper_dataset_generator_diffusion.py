@@ -7,14 +7,14 @@ from tqdm import tqdm
 from genesis.engine.entities import RigidEntity, MPMEntity
 from genesis.engine.entities.rigid_entity import RigidLink
 import diffusion_mk2.utils.dlo_computations as dlo_utils
-from diffusion_mk2.envs.teleop.data_logger import JSONLDataLogger
+from diffusion_mk2.dataset.data_logger import JSONLDataLoggerDiffusion
 from scipy.spatial.transform import Rotation as R
 
 
 
 
 
-PROJECT_FOLDER = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+PROJECT_FOLDER = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 NUMBER_OF_EPISODES = 3
 NUMBER_OF_ACTIONS_PER_EPISODE = 8 # This is not directly used in the teleop script, but kept for consistency
 ACTION_TIME = 2.0  # seconds (for 256 batch size)
@@ -44,7 +44,7 @@ OPEN_GRIPPER_POSITION = 0.01
 
 
 
-class PushDataGenerator():
+class GripperDataGenerator():
     def __init__(self, 
                  vis=False, 
                  gui=False, 
@@ -62,7 +62,7 @@ class PushDataGenerator():
         save_path = os.path.join(PROJECT_FOLDER, "json_data")
         if not os.path.exists(save_path):
             os.makedirs(save_path, exist_ok=True)
-        self.data_logger = JSONLDataLogger(save_path, save_name + ".jsonl")
+        self.data_logger = JSONLDataLoggerDiffusion(save_path, save_name + ".jsonl")
         self.data_logger.initialize_file()
 
         self.current_episode = 0
@@ -437,7 +437,7 @@ if __name__ == "__main__":
     parser.add_argument("-n", "--save_name", type=str, default="dummy", help="save name")
     args = parser.parse_args()
 
-    generator = PushDataGenerator(vis=args.vis, 
+    generator = GripperDataGenerator(vis=args.vis, 
                                   gui=args.gui, 
                                   cpu=args.cpu, 
                                   n_episodes=args.n_episodes,
