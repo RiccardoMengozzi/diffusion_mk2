@@ -38,7 +38,7 @@ NUMBER_OF_PARTICLES = 15
 PARTICLES_NUMBER_FOR_POS_SMOOTHING = 10
 
 
-EE_VELOCITY = 0.02
+EE_VELOCITY = 0.015
 EE_ANG_VELOCITY = 0.2
 SAVE_DATA_INTERVAL = 3 # every 3 steps
 CLOSE_GRIPPER_POSITION = 0.00   
@@ -382,11 +382,11 @@ class TeleopPushDataGenerator():
         finger_qpos = self.franka.get_qpos().cpu().numpy()[-1]
         obs_ee = np.array([pos_ee[0], pos_ee[1], pos_ee[2], theta, finger_qpos])
 
-        self.scene.draw_debug_sphere(
-            pos=np.array([obs_ee[0], obs_ee[1], obs_ee[2] - EE_OFFSET]),
-            radius=0.001,
-            color=(1, 0, 0, 1),  # Red color for end effector
-        )
+        # self.scene.draw_debug_sphere(
+        #     pos=np.array([obs_ee[0], obs_ee[1], obs_ee[2] - EE_OFFSET]),
+        #     radius=0.001,
+        #     color=(1, 0, 0, 1),  # Red color for end effector
+        # )
         obs_dlo = dlo_utils.get_skeleton(self.rope.get_particles(),
                                             downsample_number=NUMBER_OF_PARTICLES,
                                             average_number=PARTICLES_NUMBER_FOR_POS_SMOOTHING)
@@ -642,7 +642,7 @@ class TeleopPushDataGenerator():
                                                                 self.real_time_factor))
             layout["footer"].update(self.monitor.make_footer_panel())
             
-            # self.live.update(layout)
+            self.live.update(layout)
             if resetting:
                 # just to show for a while the status message
                 time.sleep(1)
@@ -655,36 +655,36 @@ class TeleopPushDataGenerator():
                                             current_step=self.data_logger.episode_current_step,
                                             style="bold green")
         )
-        # self.live.update(layout)
+        self.live.update(layout)
         time.sleep(1)  # Give some time to show the saving status
 
 
     def run(self, n_episodes):
         """Run the entire teleoperation data generation process."""
-        # with Live(self.monitor.get_layout(), screen=True, refresh_per_second=10) as self.live:
-        try:
-            for i in range(n_episodes):
-                # Reset is called here, and it will now show the "Resetting Episode..." status
-                self.reset(self.initial_pose) 
-                
-                self.run_episode(i, n_episodes)
-                
-                if self.exit_command:
-                    # Exit if ESC is pressed without saving episode
-                    print("Esc pressed, exiting...")
-                    break
-                
-                # Save all episode data
-                self.data_logger.save_episode()
+        with Live(self.monitor.get_layout(), screen=True, refresh_per_second=10) as self.live:
+            try:
+                for i in range(n_episodes):
+                    # Reset is called here, and it will now show the "Resetting Episode..." status
+                    self.reset(self.initial_pose) 
+                    
+                    self.run_episode(i, n_episodes)
+                    
+                    if self.exit_command:
+                        # Exit if ESC is pressed without saving episode
+                        print("Esc pressed, exiting...")
+                        break
+                    
+                    # Save all episode data
+                    self.data_logger.save_episode()
 
 
-        finally:
-            # Clean up the keyboard listener
-            if hasattr(self, 'listener') and self.listener.running:
-                self.listener.stop()
-            if hasattr(self, 'live'):
-                self.live.stop()
-            self.data_logger.close()
+            finally:
+                # Clean up the keyboard listener
+                if hasattr(self, 'listener') and self.listener.running:
+                    self.listener.stop()
+                if hasattr(self, 'live'):
+                    self.live.stop()
+                self.data_logger.close()
 
 
 
