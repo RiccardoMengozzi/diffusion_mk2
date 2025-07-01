@@ -178,6 +178,7 @@ class GripperDataGenerator():
 
         self.episode_observations = []
         self.episode_actions = []
+        self.idx = 0
 
 
     def _step(self):
@@ -300,7 +301,7 @@ class GripperDataGenerator():
             # If we are saving data, get the action and append data
             if self.step_counter % SAVE_DATA_INTERVAL == 0 and save_data:
                 action = self.get_action()
-                self.data_logger.append_data(obs_ee, obs_dlo, obs_dlo, action) #target will be changed at the end of the action
+                self.data_logger.append_data(obs_ee, obs_dlo, obs_dlo, action, self.idx) #target will be changed at the end of the action
             
             # Update global step counter
             self.step_counter += 1
@@ -410,6 +411,7 @@ class GripperDataGenerator():
                                                 average_number=PARTICLES_NUMBER_FOR_POS_SMOOTHING)
             # Select idx randomly
             idx = np.random.randint(0, len(skeleton))
+            self.idx = idx
 
             # Grasp
             self.grasp(idx)

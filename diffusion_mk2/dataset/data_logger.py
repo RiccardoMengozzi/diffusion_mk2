@@ -36,7 +36,7 @@ class JSONLDataLoggerDiffusion:
         
     
     
-    def append_data(self, obs_ee, obs_dlo, obs_target, action):
+    def append_data(self, obs_ee, obs_dlo, obs_target, action, idx):
         """Append observation and action to file"""
         data = {
             "type": "data",
@@ -44,6 +44,7 @@ class JSONLDataLoggerDiffusion:
             "obs_dlo": obs_dlo.tolist(),  # Convert numpy array to list
             "obs_target": obs_target.tolist(),  # Convert
             "action": action.tolist(),
+            "idx": idx, 
         }
         self.episode_data.append(data)
         self.action_data.append(data)
