@@ -8,55 +8,54 @@ import json
 # ------------------------------------------------------------
 
 project_dir   = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-filename  = os.path.join(project_dir, "json_data", "fixed_simple_fc_combined.jsonl")
+filename  = os.path.join(project_dir, "json_data", "test.jsonl")
 zarr_filename = os.path.join(project_dir, "zarr_data/shape_prediction.zarr.zip")
 
 # ------------------------------------------------------------
 
 def create_zarr_from_jsonl(npz_path: str, zarr_path: str):
 
-    # 1) Load arrays from .npz or .jsonl
-    initial_shapes = []
+    init_shapes = []
     final_shapes = []
-    actions      = []
+    actions = []
 
-    #### JSONL ####
-    if filename.endswith(".jsonl"):
-        with open(filename, 'r') as f:
-            for line in f:
-                try:
-                    data = json.loads(line.strip())
-                    
-                    if data.get("type") == "data":
-                        # Extract observation and action
-                        initial_shape = np.array(data["initial_shape"])
-                        final_shape = np.array(data["final_shape"])
-                        action = np.array(data["action"])
-                        
+    with open(filename, 'r') as f:
+        is_first_obs_of_episode = True
+        for line in f:
+            try:
+                data = json.loads(line.strip())
+                if data.get("type") == "data":
+                    if is_first_obs_of_episode:
+                        init_shapes.append(np.array(data["obs_dlo"]))
+                        final_shapes.append(np.array(data["obs_target"]))
+                        actions.append(np.array(data["action_from_grasp_to_release"]))
+                        is_first_obs_of_episode = False
+                    else:
+                        continue
 
-                        initial_shape = initial_shape.flatten()
-                        final_shape = final_shape.flatten()
-                        action = action.flatten()
+                elif data.get("type") == "episode_end":
+                    is_first_obs_of_episode = True
 
-                        initial_shapes.append(initial_shape)
-                        final_shapes.append(final_shape)
-                        actions.append(action)
-                    
-                    
-                        
-                except json.JSONDecodeError as e:
-                    print(f"Warning: Skipping invalid JSON line: {e}")
-                    continue
+            except json.JSONDecodeError as e:
+                print(f"Warning: Skipping invalid JSON line: {e}")
+                continue
 
-        if not initial_shapes:
-            raise ValueError("No valid observation/action pairs found in JSON file")
 
-        initial_shapes = np.array(initial_shapes, dtype=np.float32)
-        final_shapes = np.array(final_shapes, dtype=np.float32)
-        actions = np.array(actions, dtype=np.float32)
+    # Convert to numpy arrays
+    init_shapes = np.array(init_shapes, dtype=np.float32)
+    final_shapes = np.array(final_shapes, dtype=np.float32)
+    actions = np.array(actions, dtype=np.float32)
+
+    print("init_shapes:", init_shapes.shape)
+    print("final_shapes:", final_shapes.shape)
+    print("actions:", actions.shape)
+
+    print(init_shapes[0])
+    print(final_shapes[0])
+    print(actions[0])
 
     #### CREATE ZARR ####
-    N_obs = initial_shapes.shape[0]
+    N_obs = init_shapes.shape[0]
     N_act = actions.shape[0]
     if N_obs != N_act:
         raise ValueError(
@@ -65,7 +64,7 @@ def create_zarr_from_jsonl(npz_path: str, zarr_path: str):
 
     # 2) Flatten observations into (N, obs_dim)
     #    Here obs_dim = (O+1)*2
-    initial_shapes = initial_shapes.reshape(N_obs, -1).astype("float32")
+    init_shapes = init_shapes.reshape(N_obs, -1).astype("float32")
     final_shapes = final_shapes.reshape(N_obs, -1).astype("float32")
     actions  = actions.astype("float32")
 
@@ -80,10 +79,9 @@ def create_zarr_from_jsonl(npz_path: str, zarr_path: str):
 
     # 5) Create subgroups "data" and "meta"
     data_grp = root.create_group("data")
-    meta_grp = root.create_group("meta")
 
     # 6) Determine chunk shapes (tune chunk sizes to your preference)
-    shape_dim = initial_shapes.shape[1]
+    shape_dim = init_shapes.shape[1]
     action_dim = actions.shape[1]
     chunk_samples = min(100, N_obs)
 
@@ -117,13 +115,13 @@ def create_zarr_from_jsonl(npz_path: str, zarr_path: str):
 
 
     # 9) Write data into the Zarr datasets
-    data_grp["initial_shape"][:] = initial_shapes
+    data_grp["initial_shape"][:] = init_shapes
     data_grp["final_shape"][:] = final_shapes
     data_grp["action"][:] = actions
 
     zstore.close()
     print(f"Successfully wrote Zarr‐Zip store to: {zarr_path}")
-    print(f"  - Initial shapes: {initial_shapes.shape}")
+    print(f"  - Initial shapes: {init_shapes.shape}")
     print(f"  - Final shapes: {final_shapes.shape}")
     print(f"  - Actions: {actions.shape}")
 

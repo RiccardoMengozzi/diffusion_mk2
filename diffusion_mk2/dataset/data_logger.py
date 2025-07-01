@@ -36,7 +36,7 @@ class JSONLDataLoggerDiffusion:
         
     
     
-    def append_data(self, obs_ee, obs_dlo, obs_target, action, idx):
+    def append_data(self, obs_ee, obs_dlo, obs_target, action, action_from_grasp_to_release):
         """Append observation and action to file"""
         data = {
             "type": "data",
@@ -44,7 +44,7 @@ class JSONLDataLoggerDiffusion:
             "obs_dlo": obs_dlo.tolist(),  # Convert numpy array to list
             "obs_target": obs_target.tolist(),  # Convert
             "action": action.tolist(),
-            "idx": idx, 
+            "action_from_grasp_to_release": action_from_grasp_to_release, # could be None at first, so no tolist()
         }
         self.episode_data.append(data)
         self.action_data.append(data)
@@ -59,13 +59,14 @@ class JSONLDataLoggerDiffusion:
         self.action_data = []
         self.action_current_step = 0
 
-    def update_action_data(self, obs_target):
+    def update_action_data(self, obs_target, action_from_grasp_to_release):
         """Once action is finished, update the action data with the target observation"""
         if self.action_data:
             action_data_length = len(self.action_data)
             # Update the last action data with the target observation
             for i in range(1, action_data_length + 1):
                 self.action_data[-i]["obs_target"] = obs_target.tolist()
+                self.action_data[-i]["action_from_grasp_to_release"] = action_from_grasp_to_release
         else:
             print("No action data to update.")
         self.delete_action_data()

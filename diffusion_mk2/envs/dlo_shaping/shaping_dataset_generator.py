@@ -7,7 +7,7 @@ from tqdm import tqdm
 from genesis.engine.entities import RigidEntity, MPMEntity
 from genesis.engine.entities.rigid_entity import RigidLink
 import diffusion_mk2.utils.dlo_computations as dlo_utils
-from diffusion_mk2.dataset.data_logger import JSONLDataLoggerSimpleFC
+from diffusion_mk2.dataset.data_logger import JSONLDataLoggerDiffusion
 from scipy.spatial.transform import Rotation as R
 
 
@@ -33,18 +33,19 @@ ROPE_BASE_POSITION = np.array([0.5, 0.0, HEIGHT_OFFSET + ROPE_RADIUS])
 NUMBER_OF_PARTICLES = 15
 PARTICLES_NUMBER_FOR_POS_SMOOTHING = 10
 
-ROPE_RESET_INTERVAL = 5 # episodes
+ROPE_RESET_INTERVAL = 3 # episodes
 
 EE_VELOCITY = 0.02
 EE_ANG_VELOCITY = 0.2
-SAVE_DATA_INTERVAL = 3 # every 3 steps
+SAVE_DATA_INTERVAL = 6 # 
 CLOSE_GRIPPER_POSITION = 0.00   
 OPEN_GRIPPER_POSITION = 0.01  
+MAX_ACTION_DISPLACEMENT = 0.035  # Maximum displacement in x and y
+MAX_ACTION_ROTATION = np.pi / 4  # Maximum rotation in radians
 
 
 
-
-class ShapePredictionDataGenerator():
+class GripperDataGenerator():
     def __init__(self, 
                  vis=False, 
                  gui=False, 
@@ -62,7 +63,7 @@ class ShapePredictionDataGenerator():
         save_path = os.path.join(PROJECT_FOLDER, "json_data")
         if not os.path.exists(save_path):
             os.makedirs(save_path, exist_ok=True)
-        self.data_logger = JSONLDataLoggerSimpleFC(save_path, save_name + ".jsonl")
+        self.data_logger = JSONLDataLoggerDiffusion(save_path, save_name + ".jsonl")
         self.data_logger.initialize_file()
 
         self.current_episode = 0
@@ -96,8 +97,8 @@ class ShapePredictionDataGenerator():
                 show_world_frame=True,
             ),
             mpm_options=gs.options.MPMOptions(
-                lower_bound=(0.2, -0.3, HEIGHT_OFFSET - 0.05),
-                upper_bound=(0.8, 0.3, HEIGHT_OFFSET + 0.1),
+                lower_bound=(0.1, -0.4, HEIGHT_OFFSET - 0.05),
+                upper_bound=(0.9, 0.4, HEIGHT_OFFSET + 0.1),
                 grid_density=MPM_GRID_DENSITY,
             ),
             show_FPS=self.show_fps,
@@ -177,6 +178,7 @@ class ShapePredictionDataGenerator():
 
         self.episode_observations = []
         self.episode_actions = []
+        self.action_from_grasp_to_release = None
 
 
     def _step(self):
@@ -188,8 +190,8 @@ class ShapePredictionDataGenerator():
 
     def reset_rope_pos(self):
         rope_pos = self.rope_init_pos
-        rope_pos[:, 0] += np.random.uniform(-0.05, 0.05)  # Randomize x position slightly
-        rope_pos[:, 1] += np.random.uniform(-0.05, 0.05)  # Randomize y position slightly
+        rope_pos[:, 0] += np.random.uniform(-0.025, 0.025)  # Randomize x position slightly
+        rope_pos[:, 1] += np.random.uniform(-0.025, 0.025)  # Randomize y position slightly
         self.rope.set_pos(self.rope._sim.cur_substep_local, self.rope_init_pos)
 
     def reset(self, reset_rope_position=False):
@@ -218,6 +220,35 @@ class ShapePredictionDataGenerator():
         self.franka.set_qpos(qpos)
         self._step()
 
+
+
+
+    def get_observation(self):
+        pos_ee = self.end_effector.get_pos().cpu().numpy()
+        theta = R.from_quat(self.end_effector.get_quat().cpu().numpy()).as_euler('xyz')[0] # dont ask why [0], but it works
+        finger_qpos = self.franka.get_qpos().cpu().numpy()[-1]
+        obs_ee = np.array([pos_ee[0], pos_ee[1], pos_ee[2], theta, finger_qpos])
+
+        # self.scene.draw_debug_sphere(
+        #     pos=np.array([obs_ee[0], obs_ee[1], obs_ee[2] - EE_OFFSET]),
+        #     radius=0.001,
+        #     color=(1, 0, 0, 1),  # Red color for end effector
+        # )
+        obs_dlo = dlo_utils.get_skeleton(self.rope.get_particles(),
+                                            downsample_number=NUMBER_OF_PARTICLES,
+                                            average_number=PARTICLES_NUMBER_FOR_POS_SMOOTHING)
+
+
+        return obs_ee, obs_dlo
+
+    def get_action(self):
+        pos_ee = self.end_effector.get_pos().cpu().numpy()
+        theta = R.from_quat(self.end_effector.get_quat().cpu().numpy()).as_euler('xyz')[0]
+        finger_qpos = self.franka.get_qpos().cpu().numpy()[-1]
+
+        action = np.array([pos_ee[0], pos_ee[1], pos_ee[2], theta, finger_qpos])
+        return action
+
  
     def move(self, 
              target_pos=None,
@@ -227,7 +258,8 @@ class ShapePredictionDataGenerator():
              force_control=False,
              force_intensity=1,
              path_period=0.5,
-             tolerance=1e-7):
+             tolerance=1e-7,
+             save_data=False):
         """ Primitive move function """
         # If I already provide qpos, i don't compute it
         if qpos is None:
@@ -255,6 +287,9 @@ class ShapePredictionDataGenerator():
 
         # Control the robot along the path
         for p in path:
+            # If we are saving data, get the observation
+            if self.step_counter % SAVE_DATA_INTERVAL == 0 and save_data:
+                obs_ee, obs_dlo = self.get_observation()
 
             self.franka.control_dofs_position(p[:-2], self.motors_dof)
             if force_control:
@@ -263,6 +298,14 @@ class ShapePredictionDataGenerator():
                 self.franka.control_dofs_position(p[-2:], self.fingers_dof)
             self._step()
 
+            # If we are saving data, get the action and append data
+            if self.step_counter % SAVE_DATA_INTERVAL == 0 and save_data:
+                action = self.get_action()
+                # target will be changed at the end of the action
+                self.data_logger.append_data(obs_ee, obs_dlo, obs_dlo, action, self.action_from_grasp_to_release) 
+            
+            # Update global step counter
+            self.step_counter += 1
 
             # Check if the robot has reached the target position
             if np.linalg.norm(qpos.cpu().numpy() - self.franka.get_qpos().cpu().numpy()) < tolerance:
@@ -287,6 +330,7 @@ class ShapePredictionDataGenerator():
             target_quat=target_quat,
             path_period=1.0,  
             gripper_open=True,  
+            save_data=True,  # Save data during this action
         )
 
         # Close the gripper
@@ -295,6 +339,7 @@ class ShapePredictionDataGenerator():
             path_period=0.5,
             gripper_open=False,  # Close the gripper
             force_control=True,  # Use force control to grasp
+            save_data=True,  # Save data during this action
         )
 
     def release(self):
@@ -306,6 +351,7 @@ class ShapePredictionDataGenerator():
             qpos=qpos,
             path_period=0.5,
             gripper_open=True,  # Open the gripper
+            save_data=True,  # Save data during this action
         )
 
         # Move up
@@ -314,6 +360,7 @@ class ShapePredictionDataGenerator():
             target_quat=self.end_effector.get_quat().cpu().numpy(),
             path_period=0.5,
             gripper_open=True,  # Keep the gripper open
+            save_data=True,  # Save data during this action
         )
 
     def random_action(self):
@@ -322,8 +369,8 @@ class ShapePredictionDataGenerator():
         current_pos = self.end_effector.get_pos().cpu().numpy()
         current_quat = self.end_effector.get_quat().cpu().numpy()
 
-        delta_xy = np.random.uniform(-0.05, 0.05, size=2)
-        delta_yaw = np.random.uniform(-np.pi / 4, np.pi / 4)  # Random yaw rotation
+        delta_xy = np.random.uniform(-MAX_ACTION_DISPLACEMENT, MAX_ACTION_DISPLACEMENT, size=2)
+        delta_yaw = np.random.uniform(-MAX_ACTION_ROTATION, MAX_ACTION_ROTATION)  # Random yaw rotation
 
         target_pos = [current_pos[0] + delta_xy[0], current_pos[1] + delta_xy[1], current_pos[2]]
 
@@ -337,11 +384,22 @@ class ShapePredictionDataGenerator():
         self.move(
             target_pos=target_pos,
             target_quat=target_quat,
-            path_period=1.0, # only one step
+            path_period=1.0, 
             gripper_open=False,
+            save_data=True,  # Save data during this action
         )
+        return [delta_xy[0], delta_xy[1], delta_yaw]
 
-        return delta_xy[0], delta_xy[1], delta_yaw
+    def update_action_data(self, action_from_grasp_to_release, show_target=False):
+        _, obs_target = self.get_observation()
+        self.data_logger.update_action_data(obs_target, action_from_grasp_to_release)
+        if show_target:
+            dlo_utils.draw_skeleton(
+                obs_target,
+                self.scene,
+                ROPE_RADIUS,
+            )
+            time.sleep(1)
 
 
     def run(self):
@@ -353,28 +411,25 @@ class ShapePredictionDataGenerator():
             skeleton = dlo_utils.get_skeleton(self.rope.get_particles(),
                                                 downsample_number=NUMBER_OF_PARTICLES,
                                                 average_number=PARTICLES_NUMBER_FOR_POS_SMOOTHING)
-            initial_shape = skeleton.copy()
             # Select idx randomly
             idx = np.random.randint(0, len(skeleton))
-            
+            self.idx = idx
+
             # Grasp
             self.grasp(idx)
 
             # Move randomly
-            x, y, yaw = self.random_action()
-            action = np.array([idx, x, y, yaw])
+            self.action_from_grasp_to_release = self.random_action()
+            
 
             # Release
-            self.release() # currently not savind release data
-            skeleton = dlo_utils.get_skeleton(self.rope.get_particles(),
-                                                downsample_number=NUMBER_OF_PARTICLES,
-                                                average_number=PARTICLES_NUMBER_FOR_POS_SMOOTHING)
-            final_shape = skeleton.copy()
+            self.release() 
+
+            # Update all previous action data with current dlo state as target
+            self.update_action_data(self.action_from_grasp_to_release, show_target=False)
 
             # Save the episode
-            self.data_logger.save_data(initial_shape=initial_shape,
-                                          final_shape=final_shape,
-                                          action=action)
+            self.data_logger.save_episode()
                 
 
 
@@ -389,7 +444,7 @@ if __name__ == "__main__":
     parser.add_argument("-n", "--save_name", type=str, default="dummy", help="save name")
     args = parser.parse_args()
 
-    generator = ShapePredictionDataGenerator(vis=args.vis, 
+    generator = GripperDataGenerator(vis=args.vis, 
                                   gui=args.gui, 
                                   cpu=args.cpu, 
                                   n_episodes=args.n_episodes,
