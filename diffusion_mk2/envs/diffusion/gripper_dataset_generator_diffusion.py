@@ -236,6 +236,14 @@ class GripperDataGenerator():
         obs_dlo = dlo_utils.get_skeleton(self.rope.get_particles(),
                                             downsample_number=NUMBER_OF_PARTICLES,
                                             average_number=PARTICLES_NUMBER_FOR_POS_SMOOTHING)
+        self.scene.clear_debug_objects()
+        dlo_utils.draw_skeleton(
+            self.scene,
+            obs_dlo,
+            color=(0, 1, 0, 1),  # Green color for rope
+            radius=ROPE_RADIUS,
+        )
+
         return obs_ee, obs_dlo
 
     def get_action(self):
