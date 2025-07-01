@@ -303,7 +303,7 @@ class GripperDataGenerator():
             if self.step_counter % SAVE_DATA_INTERVAL == 0 and save_data:
                 action = self.get_action()
                 # target will be changed at the end of the action
-                self.data_logger.append_data(obs_ee, obs_dlo, obs_dlo, action, self.idx, self.action_from_grasp_to_release) 
+                self.data_logger.append_data(obs_ee, obs_dlo, obs_dlo, action, self.action_from_grasp_to_release) 
             
             # Update global step counter
             self.step_counter += 1
@@ -391,9 +391,9 @@ class GripperDataGenerator():
         )
         return [delta_xy[0], delta_xy[1], delta_yaw]
 
-    def update_action_data(self, idx, action_from_grasp_to_release, show_target=False):
+    def update_action_data(self, action_from_grasp_to_release, show_target=False):
         _, obs_target = self.get_observation()
-        self.data_logger.update_action_data(obs_target, idx, action_from_grasp_to_release)
+        self.data_logger.update_action_data(obs_target, action_from_grasp_to_release)
         if show_target:
             dlo_utils.draw_skeleton(
                 obs_target,
@@ -414,20 +414,22 @@ class GripperDataGenerator():
                                                 average_number=PARTICLES_NUMBER_FOR_POS_SMOOTHING)
             # Select idx randomly
             idx = np.random.randint(0, len(skeleton))
-            self.idx = idx
 
             # Grasp
             self.grasp(idx)
 
             # Move randomly
             self.action_from_grasp_to_release = self.random_action()
-            
+            self.action_from_grasp_to_release = [idx, 
+                                                 self.action_from_grasp_to_release[0], 
+                                                 self.action_from_grasp_to_release[1], 
+                                                 self.action_from_grasp_to_release[2]]
 
             # Release
             self.release() 
 
             # Update all previous action data with current dlo state as target
-            self.update_action_data(self.idx, self.action_from_grasp_to_release, show_target=False)
+            self.update_action_data(self.action_from_grasp_to_release, show_target=False)
 
             # Save the episode
             self.data_logger.save_episode()

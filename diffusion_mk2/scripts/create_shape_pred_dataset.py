@@ -17,7 +17,6 @@ def create_zarr_from_jsonl(npz_path: str, zarr_path: str):
 
     init_shapes = []
     final_shapes = []
-    idxs = []  # Store the index of the particle to grasp
     actions = []
 
     with open(filename, 'r') as f:
@@ -29,7 +28,6 @@ def create_zarr_from_jsonl(npz_path: str, zarr_path: str):
                     if is_first_obs_of_episode:
                         init_shapes.append(np.array(data["obs_dlo"]))
                         final_shapes.append(np.array(data["obs_target"]))
-                        idxs.append(data["idx"])  # Store the index of the particle to grasp
                         actions.append(np.array(data["action_from_grasp_to_release"]))
                         is_first_obs_of_episode = False
                     else:
@@ -46,17 +44,14 @@ def create_zarr_from_jsonl(npz_path: str, zarr_path: str):
     # Convert to numpy arrays
     init_shapes = np.array(init_shapes, dtype=np.float32)
     final_shapes = np.array(final_shapes, dtype=np.float32)
-    idxs = np.array(idxs, dtype=np.int32)  # Store the index of the particle to grasp
     actions = np.array(actions, dtype=np.float32)
 
     print("init_shapes:", init_shapes.shape)
     print("final_shapes:", final_shapes.shape)
-    print("idxs:", idxs.shape)
     print("actions:", actions.shape)
 
     print(init_shapes[0])
     print(final_shapes[0])
-    print(idxs[0])  # Print the index of the particle to grasp
     print(actions[0])
 
     #### CREATE ZARR ####
@@ -71,7 +66,6 @@ def create_zarr_from_jsonl(npz_path: str, zarr_path: str):
     #    Here obs_dim = (O+1)*2
     init_shapes = init_shapes.reshape(N_obs, -1).astype("float32")
     final_shapes = final_shapes.reshape(N_obs, -1).astype("float32")
-    idxs = idxs.reshape(N_obs, 1).astype("int32")  # Reshape to (N_obs, 1)
     actions  = actions.astype("float32")
 
     # 3) Remove any existing Zarr‐Zip so we can create afresh
@@ -93,7 +87,6 @@ def create_zarr_from_jsonl(npz_path: str, zarr_path: str):
 
     initial_shape_chunks  = (chunk_samples, shape_dim)
     final_shape_chunks    = (chunk_samples, shape_dim)
-    idxs_chunks            = (chunk_samples, 1)  # Index of the particle to grasp
     action_chunks         = (chunk_samples, action_dim)
 
     # 7) Create the two datasets under data/
@@ -113,14 +106,6 @@ def create_zarr_from_jsonl(npz_path: str, zarr_path: str):
     )
 
     data_grp.create_dataset(
-        name="idx",
-        shape=(N_obs, 1),  # Store the index of the particle to grasp
-        chunks=idxs_chunks,
-        dtype="int32",
-        compressor=zarr.Blosc(cname="zstd", clevel=3),
-    )
-
-    data_grp.create_dataset(
         name="action",
         shape=(N_obs, action_dim),
         chunks=action_chunks,
@@ -132,14 +117,12 @@ def create_zarr_from_jsonl(npz_path: str, zarr_path: str):
     # 9) Write data into the Zarr datasets
     data_grp["initial_shape"][:] = init_shapes
     data_grp["final_shape"][:] = final_shapes
-    data_grp["idx"][:] = idxs  # Store the index of the particle to grasp
     data_grp["action"][:] = actions
 
     zstore.close()
     print(f"Successfully wrote Zarr‐Zip store to: {zarr_path}")
     print(f"  - Initial shapes: {init_shapes.shape}")
     print(f"  - Final shapes: {final_shapes.shape}")
-    print(f"  - Index of particle to grasp: {idxs.shape}")
     print(f"  - Actions: {actions.shape}")
 
 
