@@ -81,7 +81,7 @@ with tqdm(range(config["epochs"]), desc="Epoch") as epoch_bar:
 
         if epoch % CHECKPOINT_INTERVAL == 0:
             # Save model checkpoint
-            checkpoint_path = os.path.join(PROJECT_DIR, "checkpoints", "shape_prediction", f"chkp_{epoch}.pth")
+            checkpoint_path = os.path.join(PROJECT_DIR, "checkpoints", "shape_prediction", f"chkp_{epoch}.pt")
             state = dict(config)
             state["model"] = model.state_dict()
             torch.save(state, checkpoint_path)
@@ -91,7 +91,7 @@ with tqdm(range(config["epochs"]), desc="Epoch") as epoch_bar:
         
 
 ## save
-model_path = os.path.join(PROJECT_DIR, "checkpoints", "shape_prediction", "final_model.pth")
+model_path = os.path.join(PROJECT_DIR, "checkpoints", "shape_prediction", "final_model.pt")
 state = dict(config)
 state["model"] = model.state_dict()
 torch.save(state, model_path)
