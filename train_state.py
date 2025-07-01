@@ -161,15 +161,13 @@ class DiffusionTrainer:
             "optimizer_state_dict": self.optimizer.state_dict(),
             "lr_scheduler_state_dict": self.lr_scheduler.state_dict(),
             "avg_loss": avg_loss,
-            "config": {
-                "obs_dim": self.OBS_DIM,
-                "obs_horizon": self.OBS_HORIZON,
-                "action_dim": self.ACTION_DIM,
-                "action_horizon": self.ACTION_HORIZON,
-                "pred_horizon": self.PRED_HORIZON,
-                "noise_scheduler_config": self.noise_scheduler.config,
-                "dataset_stats": self.stats,
-            }
+            "obs_dim": self.OBS_DIM,
+            "obs_horizon": self.OBS_HORIZON,
+            "action_dim": self.ACTION_DIM,
+            "action_horizon": self.ACTION_HORIZON,
+            "pred_horizon": self.PRED_HORIZON,
+            "noise_scheduler_config": self.noise_scheduler.config,
+            "dataset_stats": self.stats,
         }
         
         checkpoint_path = os.path.join(self.checkpoint_dir, f"chkp_{self.run.name}_epoch_{epoch}.pt")

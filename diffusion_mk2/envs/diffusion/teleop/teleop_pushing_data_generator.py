@@ -382,6 +382,7 @@ class TeleopPushDataGenerator():
         finger_qpos = self.franka.get_qpos().cpu().numpy()[-1]
         obs_ee = np.array([pos_ee[0], pos_ee[1], pos_ee[2], theta, finger_qpos])
 
+
         # self.scene.draw_debug_sphere(
         #     pos=np.array([obs_ee[0], obs_ee[1], obs_ee[2] - EE_OFFSET]),
         #     radius=0.001,
@@ -390,6 +391,10 @@ class TeleopPushDataGenerator():
         obs_dlo = dlo_utils.get_skeleton(self.rope.get_particles(),
                                             downsample_number=NUMBER_OF_PARTICLES,
                                             average_number=PARTICLES_NUMBER_FOR_POS_SMOOTHING)
+        
+        self.scene.clear_debug_objects()
+        dlo_utils.draw_skeleton(obs_dlo, self.scene, ROPE_RADIUS)
+
         obs_target = self.target_shape
         return obs_ee, obs_dlo, obs_target
 

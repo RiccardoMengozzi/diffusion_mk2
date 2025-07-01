@@ -106,21 +106,43 @@ def unnormalize_data(ndata, stats):
 
 # dataset
 class PushTStateDataset(torch.utils.data.Dataset):
-    def __init__(self, dataset_path,
-                 pred_horizon, obs_horizon, action_horizon):
+    def __init__(self, 
+                 dataset_path,
+                 pred_horizon, 
+                 obs_horizon, 
+                 action_horizon,
+                 obs_ee_dim,
+                 obs_dlo_dim,
+                 obs_target_dim):
+        
+        self.obs_ee_dim = obs_ee_dim
+        self.obs_dlo_dim = obs_dlo_dim
+        self.obs_target_dim = obs_target_dim
 
         # read from zarr dataset
         dataset_root = zarr.open(dataset_path, 'r')
+        print("Dataset root keys:", dataset_root.keys())
+        print("Dataset data keys:", dataset_root['data'].keys())
+        print("Dataset meta keys:", dataset_root['meta'].keys())
+        print("dataset length:", len(dataset_root['data']['action']))
+        print("episode ends length:", len(dataset_root['meta']['episode_ends']))
+        processed_dataset_root = self.preprocess(dataset_root)
+        print("Processed dataset root keys:", processed_dataset_root.keys())
+        print("Processed dataset data keys:", processed_dataset_root['data'].keys())
+        print("Processed dataset meta keys:", processed_dataset_root['meta'].keys())
+        print("Processed dataset length:", len(processed_dataset_root['data']['action']))
+        print("Processed episode ends length:", len(processed_dataset_root['meta']['episode_ends']))
+
         # All demonstration episodes are concatinated in the first dimension N
         train_data = {
             # (N, action_dim)
-            'action': dataset_root['data']['action'][:],
+            'action': processed_dataset_root['data']['action'][:],
             # (N, obs_dim)
-            'obs': dataset_root['data']['state'][:]
+            'obs': processed_dataset_root['data']['state'][:]
         }
         
         # Marks one-past the last index for each episode
-        episode_ends = dataset_root['meta']['episode_ends'][:]
+        episode_ends = processed_dataset_root['meta']['episode_ends'][:]
         self.episode_ends = episode_ends
         # compute start and end of each state-action sequence
         # also handles padding
@@ -144,6 +166,59 @@ class PushTStateDataset(torch.utils.data.Dataset):
         self.pred_horizon = pred_horizon
         self.action_horizon = action_horizon
         self.obs_horizon = obs_horizon
+
+
+    def preprocess(self, dataset_root): 
+        second_segment = [self.obs_ee_dim, self.obs_ee_dim + self.obs_dlo_dim]
+        third_segment = [second_segment[1], second_segment[1] + self.obs_target_dim]
+
+        # Load full arrays into memory
+        states = dataset_root['data']['state'][:]
+        actions = dataset_root['data']['action'][:]
+
+        init_shapes = states[:, second_segment[0]:second_segment[1]].reshape(-1, 15, 3)
+        final_shapes = states[:, third_segment[0]:third_segment[1]].reshape(-1, 15, 3)
+
+        threshold = 1e-3  # Very small distance below which we assume collapse
+
+        def has_close_points(shape_array):
+            """Check if any pair of points in a shape are closer than threshold."""
+            diff = shape_array[:, :, None, :] - shape_array[:, None, :, :]  # (B, 15, 15, 3)
+            dists = np.linalg.norm(diff, axis=-1)  # (B, 15, 15)
+            # Set diagonal to a large value to ignore self-comparison
+            np.fill_diagonal(dists.reshape(-1, 15, 15), np.inf)
+            min_dist = dists.min(axis=(1, 2))  # Minimum distance between any two points per sample
+            return min_dist < threshold  # Boolean mask
+
+        init_bad = has_close_points(init_shapes)
+        final_bad = has_close_points(final_shapes)
+
+        # Discard if either init or final shape is bad
+        mask = ~(init_bad | final_bad)
+
+        # Filter data
+        filtered_dataset = {
+            'data': {
+                'state': states[mask],
+                'action': actions[mask],
+            }
+        }
+
+        # Recompute episode ends
+        original_ends = dataset_root['meta']['episode_ends'][:]
+        valid_idx = np.nonzero(mask)[0]
+
+        new_episode_ends = []
+        current_start = 0
+        for end in original_ends:
+            count = np.sum((valid_idx >= current_start) & (valid_idx < end))
+            current_start = end
+            if count > 0:
+                new_episode_ends.append(count + (new_episode_ends[-1] if new_episode_ends else 0))
+
+        filtered_dataset['meta'] = {'episode_ends': np.array(new_episode_ends, dtype=np.int32)}
+        return filtered_dataset
+
 
     def __len__(self):
         # all possible segments of the dataset
@@ -172,10 +247,13 @@ class PushTStateDataset(torch.utils.data.Dataset):
 if __name__ == "__main__":
     # Example usage
     dataset = PushTStateDataset(
-        dataset_path="/home/mengo/Research/LLM_DOM/diffusion_mk2/zarr_data/teleop_pushing_dataset.zarr.zip",
+        dataset_path="/home/mengo/Research/LLM_DOM/diffusion_mk2/zarr_data/combined_pushing_dataset.zarr.zip",
         pred_horizon=16,
         obs_horizon=2,
-        action_horizon=8
+        action_horizon=8,
+        obs_ee_dim=5,
+        obs_dlo_dim=45,
+        obs_target_dim=45
     )
     
     print("Dataset length:", len(dataset))

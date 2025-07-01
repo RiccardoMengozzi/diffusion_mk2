@@ -33,14 +33,15 @@ ROPE_BASE_POSITION = np.array([0.5, 0.0, HEIGHT_OFFSET + ROPE_RADIUS])
 NUMBER_OF_PARTICLES = 15
 PARTICLES_NUMBER_FOR_POS_SMOOTHING = 10
 
-ROPE_RESET_INTERVAL = 5 # episodes
+ROPE_RESET_INTERVAL = 3 # episodes
 
 EE_VELOCITY = 0.02
 EE_ANG_VELOCITY = 0.2
-SAVE_DATA_INTERVAL = 6 # every 3 steps
+SAVE_DATA_INTERVAL = 6 # 
 CLOSE_GRIPPER_POSITION = 0.00   
 OPEN_GRIPPER_POSITION = 0.01  
-
+MAX_ACTION_DISPLACEMENT = 0.035  # Maximum displacement in x and y
+MAX_ACTION_ROTATION = np.pi / 4  # Maximum rotation in radians
 
 
 
@@ -96,8 +97,8 @@ class GripperDataGenerator():
                 show_world_frame=True,
             ),
             mpm_options=gs.options.MPMOptions(
-                lower_bound=(0.2, -0.3, HEIGHT_OFFSET - 0.05),
-                upper_bound=(0.8, 0.3, HEIGHT_OFFSET + 0.1),
+                lower_bound=(0.2, -0.4, HEIGHT_OFFSET - 0.05),
+                upper_bound=(0.8, 0.4, HEIGHT_OFFSET + 0.1),
                 grid_density=MPM_GRID_DENSITY,
             ),
             show_FPS=self.show_fps,
@@ -188,8 +189,8 @@ class GripperDataGenerator():
 
     def reset_rope_pos(self):
         rope_pos = self.rope_init_pos
-        rope_pos[:, 0] += np.random.uniform(-0.05, 0.05)  # Randomize x position slightly
-        rope_pos[:, 1] += np.random.uniform(-0.05, 0.05)  # Randomize y position slightly
+        rope_pos[:, 0] += np.random.uniform(-0.025, 0.025)  # Randomize x position slightly
+        rope_pos[:, 1] += np.random.uniform(-0.025, 0.025)  # Randomize y position slightly
         self.rope.set_pos(self.rope._sim.cur_substep_local, self.rope_init_pos)
 
     def reset(self, reset_rope_position=False):
@@ -364,8 +365,8 @@ class GripperDataGenerator():
         current_pos = self.end_effector.get_pos().cpu().numpy()
         current_quat = self.end_effector.get_quat().cpu().numpy()
 
-        delta_xy = np.random.uniform(-0.05, 0.05, size=2)
-        delta_yaw = np.random.uniform(-np.pi / 4, np.pi / 4)  # Random yaw rotation
+        delta_xy = np.random.uniform(-MAX_ACTION_DISPLACEMENT, MAX_ACTION_DISPLACEMENT, size=2)
+        delta_yaw = np.random.uniform(-MAX_ACTION_ROTATION, MAX_ACTION_ROTATION)  # Random yaw rotation
 
         target_pos = [current_pos[0] + delta_xy[0], current_pos[1] + delta_xy[1], current_pos[2]]
 
@@ -415,7 +416,7 @@ class GripperDataGenerator():
             self.random_action()
 
             # Release
-            self.release() # currently not savind release data
+            self.release() 
 
             # Update all previous action data with current dlo state as target
             self.update_action_data(show_target=False)

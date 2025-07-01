@@ -99,18 +99,18 @@ class InferenceState:
             "action_horizon", "pred_horizon", "noise_scheduler_config", "dataset_stats"
         ]
         
-        for key in required_keys:
-            if key not in ckpt:
-                raise KeyError(f"Missing required key in checkpoint: {key}")
+        # for key in required_keys:
+        #     if key not in ckpt:
+        #         raise KeyError(f"Missing required key in checkpoint: {key}")
         
         self.model_state_dict = ckpt["model_state_dict"]
-        self.obs_dim = ckpt["obs_dim"]
-        self.obs_horizon = ckpt["obs_horizon"]
-        self.action_dim = ckpt["action_dim"]
-        self.action_horizon = ckpt["action_horizon"]
-        self.pred_horizon = ckpt["pred_horizon"]
-        self.noise_scheduler_config = ckpt["noise_scheduler_config"]
-        self.dataset_stats = ckpt["dataset_stats"]
+        self.obs_dim = ckpt["config"]["obs_dim"]
+        self.obs_horizon = ckpt["config"]["obs_horizon"]
+        self.action_dim = ckpt["config"]["action_dim"]
+        self.action_horizon = ckpt["config"]["action_horizon"]
+        self.pred_horizon = ckpt["config"]["pred_horizon"]
+        self.noise_scheduler_config = ckpt["config"]["noise_scheduler_config"]
+        self.dataset_stats = ckpt["config"]["dataset_stats"]
 
     def _initialize_model(self) -> None:
         """Initialize the ConditionalUnet1D model and load weights."""

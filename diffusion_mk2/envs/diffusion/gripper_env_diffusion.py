@@ -392,7 +392,7 @@ class GripperEnv():
                 self.do_action(pred_action)
                 
             # Release
-            self.release() 
+            # self.release() 
 
 
 
