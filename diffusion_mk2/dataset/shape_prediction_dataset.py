@@ -144,7 +144,6 @@ class DloDataset(Dataset, DloSample):
         initial_shapes = dataset_root['data']['initial_shape'][:].reshape(-1, num_points, 3)
         final_shapes = dataset_root['data']['final_shape'][:].reshape(-1, num_points, 3)
         actions = dataset_root['data']['action'][:]
-        print(actions)
 
         assert len(initial_shapes) == len(final_shapes) == len(actions)
 
@@ -152,20 +151,34 @@ class DloDataset(Dataset, DloSample):
 
     def preprocess(self, initial_shapes, final_shapes, actions):
         samples = []
+        nan_counter = 0
         for dlo_0, dlo_1, action in zip(initial_shapes, final_shapes, actions):
-            print(f"action1: {action}")
             dlo_0, dlo_1 = dlo_0[:, :2], dlo_1[:, :2]
             idx, dx, dy, dtheta = action
+
             if np.linalg.norm(dlo_0[0] - dlo_1[0]) > np.linalg.norm(dlo_0[0] - dlo_1[-1]):
                 dlo_1 = np.flip(dlo_1, axis=0)
+
             dlo_0_n, dlo_1_n, action_n = self.normalize(dlo_0, dlo_1, [idx, dx, dy, dtheta])
-            print(f"action2: {action_n}")
+
+            # Skip if any NaNs are present
+            if (
+                np.isnan(dlo_0_n).any() or 
+                np.isnan(dlo_1_n).any() or 
+                np.isnan(action_n).any()
+            ):
+                nan_counter += 1
+                print(nan_counter)
+                continue
+
             samples.append([
-                torch.from_numpy(dlo_0_n).float(),
-                torch.from_numpy(dlo_1_n).float(),
-                torch.from_numpy(action_n).float()
+                torch.from_numpy(dlo_0_n.copy()).float(),
+                torch.from_numpy(dlo_1_n.copy()).float(),
+                torch.from_numpy(np.array(action_n).copy()).float()
             ])
+
         return samples
+
 
     def __len__(self):
         return len(self.data_samples)

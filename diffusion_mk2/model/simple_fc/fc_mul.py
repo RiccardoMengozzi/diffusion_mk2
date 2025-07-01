@@ -11,7 +11,6 @@ class FCMul(nn.Module):
         self.N = hidden_dim
 
         a = nn.ReLU()  # nn.Tanh()
-        tanh = nn.Tanh()
 
         self.dlo = nn.Sequential(
             nn.Flatten(-2),
@@ -30,20 +29,15 @@ class FCMul(nn.Module):
             a,
         )
 
-        self.state_action = nn.Sequential(
+
+
+        self.pred = nn.Sequential(
             nn.Linear(2 * self.N, self.N),
             a,
-        )
-
-        self.pred = nn.ModuleList(
-            [
-                nn.Linear(self.N, self.N),
-                a,
-                nn.Linear(self.N, self.N),
-                a,
-                nn.Linear(self.N, self.n_pts * self.pts_dim),
-                nn.Unflatten(-1, (self.n_pts, self.pts_dim)),
-            ]
+            nn.Linear(self.N, self.N),
+            a,
+            nn.Linear(self.N, self.n_pts * self.pts_dim),
+            nn.Unflatten(-1, (self.n_pts, self.pts_dim)),
         )
 
     def forward(self, dlo, action):
@@ -52,13 +46,9 @@ class FCMul(nn.Module):
 
         x = torch.concat([x_s, x_a], dim=-1)
 
-        x = self.state_action(x)
-
-        for l in self.pred:
-            x = l(x)
+        x = self.pred(x)
 
         x += dlo
-
         return x
 
 
