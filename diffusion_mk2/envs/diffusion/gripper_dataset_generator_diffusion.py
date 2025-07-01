@@ -97,8 +97,8 @@ class GripperDataGenerator():
                 show_world_frame=True,
             ),
             mpm_options=gs.options.MPMOptions(
-                lower_bound=(0.2, -0.4, HEIGHT_OFFSET - 0.05),
-                upper_bound=(0.8, 0.4, HEIGHT_OFFSET + 0.1),
+                lower_bound=(0.1, -0.4, HEIGHT_OFFSET - 0.05),
+                upper_bound=(0.9, 0.4, HEIGHT_OFFSET + 0.1),
                 grid_density=MPM_GRID_DENSITY,
             ),
             show_FPS=self.show_fps,
@@ -236,13 +236,7 @@ class GripperDataGenerator():
         obs_dlo = dlo_utils.get_skeleton(self.rope.get_particles(),
                                             downsample_number=NUMBER_OF_PARTICLES,
                                             average_number=PARTICLES_NUMBER_FOR_POS_SMOOTHING)
-        self.scene.clear_debug_objects()
-        dlo_utils.draw_skeleton(
-            self.scene,
-            obs_dlo,
-            color=(0, 1, 0, 1),  # Green color for rope
-            radius=ROPE_RADIUS,
-        )
+
 
         return obs_ee, obs_dlo
 
