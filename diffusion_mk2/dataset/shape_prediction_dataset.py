@@ -3,6 +3,7 @@ import numpy as np
 import torch
 from torch.utils.data.dataset import Dataset
 import zarr
+from diffusion_mk2.model.normalization import DloDataProcessor, ActionDataProcessor
 
 class DloAction:
     def __init__(self, num_points=16, scale_action=False):
@@ -133,11 +134,64 @@ class DloSample:
         return (self.csR.T @ dlo.T).T + self.cs0
 
 
+# class DloDataset(Dataset, DloSample):
+#     def __init__(self, dataset_path, num_points=16, augment=False, scale_action=True):
+#         DloSample.__init__(self, num_points=num_points, scale_action=scale_action)
+#         self.augment = augment
+#         self.scale_action = scale_action
+#         self.num_points = num_points
+
+#         dataset_root = zarr.open(dataset_path, 'r')
+#         initial_shapes = dataset_root['data']['initial_shape'][:].reshape(-1, num_points, 3)
+#         final_shapes = dataset_root['data']['final_shape'][:].reshape(-1, num_points, 3)
+#         actions = dataset_root['data']['action'][:]
+
+#         assert len(initial_shapes) == len(final_shapes) == len(actions)
+
+#         self.data_samples = self.preprocess(initial_shapes, final_shapes, actions)
+
+#     def preprocess(self, initial_shapes, final_shapes, actions):
+#         samples = []
+#         nan_counter = 0
+#         for dlo_0, dlo_1, action in zip(initial_shapes, final_shapes, actions):
+#             dlo_0, dlo_1 = dlo_0[:, :2], dlo_1[:, :2]
+#             idx, dx, dy, dtheta = action
+
+#             if np.linalg.norm(dlo_0[0] - dlo_1[0]) > np.linalg.norm(dlo_0[0] - dlo_1[-1]):
+#                 dlo_1 = np.flip(dlo_1, axis=0)
+
+#             dlo_0_n, dlo_1_n, action_n = self.normalize(dlo_0, dlo_1, [idx, dx, dy, dtheta])
+
+#             # Skip if any NaNs are present
+#             if (
+#                 np.isnan(dlo_0_n).any() or 
+#                 np.isnan(dlo_1_n).any() or 
+#                 np.isnan(action_n).any()
+#             ):
+#                 nan_counter += 1
+#                 print(nan_counter)
+#                 continue
+
+            # samples.append([
+            #     torch.from_numpy(dlo_0_n.copy()).float(),
+            #     torch.from_numpy(dlo_1_n.copy()).float(),
+            #     torch.from_numpy(np.array(action_n).copy()).float()
+            # ])
+
+#         return samples
+
+
+#     def __len__(self):
+#         return len(self.data_samples)
+
+#     def __getitem__(self, idx):
+#         return self.data_samples[idx]
+
+
+
 class DloDataset(Dataset, DloSample):
-    def __init__(self, dataset_path, num_points=16, augment=False, scale_action=True):
-        DloSample.__init__(self, num_points=num_points, scale_action=scale_action)
-        self.augment = augment
-        self.scale_action = scale_action
+    def __init__(self, dataset_path, num_points=15):
+        DloSample.__init__(self, num_points=num_points)
         self.num_points = num_points
 
         dataset_root = zarr.open(dataset_path, 'r')
@@ -147,37 +201,32 @@ class DloDataset(Dataset, DloSample):
 
         assert len(initial_shapes) == len(final_shapes) == len(actions)
 
-        self.data_samples = self.preprocess(initial_shapes, final_shapes, actions)
+        self.data_samples, self.init_shape_nans, self.final_shape_nans = self.preprocess(initial_shapes, final_shapes, actions)
+
 
     def preprocess(self, initial_shapes, final_shapes, actions):
+        initial_shapes_processor = DloDataProcessor(initial_shapes[:, :, :2])
+        final_shapes_processor = DloDataProcessor(final_shapes[:, :, :2])
+        actions_processor = ActionDataProcessor(actions, self.num_points)
+
+        norm_factors = initial_shapes_processor.compute_normalize_factors_arrays()
+
+        initial_shapes_processor.set_normalize_factors_arrays(*norm_factors)
+        final_shapes_processor.set_normalize_factors_arrays(*norm_factors)
+        actions_processor.set_normalize_factors_arrays(*norm_factors)
+
+        initial_shapes_n, init_shapes_nans = initial_shapes_processor.preprocess()
+        final_shapes_n, final_shapes_nans = final_shapes_processor.preprocess()
+        actions_n = actions_processor.preprocess()
+
         samples = []
-        nan_counter = 0
-        for dlo_0, dlo_1, action in zip(initial_shapes, final_shapes, actions):
-            dlo_0, dlo_1 = dlo_0[:, :2], dlo_1[:, :2]
-            idx, dx, dy, dtheta = action
-
-            if np.linalg.norm(dlo_0[0] - dlo_1[0]) > np.linalg.norm(dlo_0[0] - dlo_1[-1]):
-                dlo_1 = np.flip(dlo_1, axis=0)
-
-            dlo_0_n, dlo_1_n, action_n = self.normalize(dlo_0, dlo_1, [idx, dx, dy, dtheta])
-
-            # Skip if any NaNs are present
-            if (
-                np.isnan(dlo_0_n).any() or 
-                np.isnan(dlo_1_n).any() or 
-                np.isnan(action_n).any()
-            ):
-                nan_counter += 1
-                print(nan_counter)
-                continue
-
+        for initial_shape_n, final_shape_n, action_n in zip(initial_shapes_n, final_shapes_n, actions_n):
             samples.append([
-                torch.from_numpy(dlo_0_n.copy()).float(),
-                torch.from_numpy(dlo_1_n.copy()).float(),
-                torch.from_numpy(np.array(action_n).copy()).float()
+                torch.from_numpy(initial_shape_n.copy()).float(),
+                torch.from_numpy(final_shape_n.copy()).float(),
+                torch.from_numpy(action_n.copy()).float()
             ])
-
-        return samples
+        return samples, init_shapes_nans, final_shapes_nans
 
 
     def __len__(self):
@@ -188,6 +237,6 @@ class DloDataset(Dataset, DloSample):
 
 
 if __name__ == "__main__":
-    dataset_path = "/home/mengo/Research/LLM_DOM/diffusion_mk2/zarr_data/shape_prediction.zarr.zip"
+    dataset_path = "/home/mengo/Research/LLM_DOM/diffusion_mk2/zarr_data/shape_prediction_better.zarr.zip"
     dataset = DloDataset(dataset_path, num_points=15)
-    print("Dataset length:", len(dataset))
+    print("Dataset length:", len(dataset), "init nans:", dataset.init_shape_nans, "final nans:", dataset.final_shape_nans)

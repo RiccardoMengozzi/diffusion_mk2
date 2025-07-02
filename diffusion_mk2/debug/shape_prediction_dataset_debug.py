@@ -1,7 +1,7 @@
 import zarr
 import matplotlib.pyplot as plt
 import numpy as np
-from diffusion_mk2.dataset.shape_prediction_dataset import DloSample
+from diffusion_mk2.model.normalization import DloDataProcessor, ActionDataProcessor
 
 np.set_printoptions(precision=4,    # number of decimal places
                     suppress=True,  # suppress scientific notation
@@ -43,27 +43,31 @@ def plot_sample(ax, dlo_0, dlo_1, action, denormalize_idx=False, title=None):
 
 
 if __name__ == "__main__":
-    dataset_path = "/home/mengo/Research/LLM_DOM/diffusion_mk2/zarr_data/shape_prediction.zarr.zip"
+    dataset_path = "/home/mengo/Research/LLM_DOM/diffusion_mk2/zarr_data/shape_prediction_better.zarr.zip"
     dataset_root = zarr.open(dataset_path, 'r')
     initial_shapes = dataset_root['data']['initial_shape'][:].reshape(-1, 15, 3)
     final_shapes = dataset_root['data']['final_shape'][:].reshape(-1, 15, 3)
     actions = dataset_root['data']['action'][:]
 
-    print(f"Dataset size: {len(initial_shapes)}")
-    num_points = initial_shapes.shape[1]
-    print("Number of points:", num_points)
+    initial_shapes = initial_shapes[:, :, :2]  # Use only the first two dimensions for plotting
+    final_shapes = final_shapes[:, :, :2]  # Use only the first two dimensions
 
-    sample_obj = DloSample(num_points=num_points, scale_action=False)
+    dlo_0_processor = DloDataProcessor(initial_shapes)
+    dlo_1_processor = DloDataProcessor(final_shapes)
+    action_processor = ActionDataProcessor(actions, num_points=15)
+
 
     for dlo_0, dlo_1, action in zip(initial_shapes, final_shapes, actions):
-        dlo_0 = dlo_0[:, :2]
-        dlo_1 = dlo_1[:, :2]
+        
+        cs0, csR = dlo_0_processor._compute_normalize_factors(dlo_0)
+        dlo_0_n = dlo_0_processor.normalize(dlo_0, cs0, csR)
+        dlo_1_n = dlo_1_processor.normalize(dlo_1, cs0, csR)
+        action_n = action_processor.normalize(action, cs0, csR)
 
-        if np.linalg.norm(dlo_0[0] - dlo_1[0]) > np.linalg.norm(dlo_0[0] - dlo_1[-1]):
-            dlo_1 = np.flip(dlo_1, axis=0)
+        dlo_0_dn = dlo_0_processor.denormalize(dlo_0_n, cs0, csR)
+        dlo_1_dn = dlo_1_processor.denormalize(dlo_1_n, cs0, csR)
+        action_dn = action_processor.denormalize(action_n, cs0, csR)
 
-        dlo_0_n, dlo_1_n, action_n = sample_obj.normalize(dlo_0, dlo_1, action)
-        dlo_0_dn, dlo_1_dn, action_dn = sample_obj.denormalize(dlo_0_n, dlo_1_n, action_n)
 
         # Print diagnostics
         print("Original action:", action)
