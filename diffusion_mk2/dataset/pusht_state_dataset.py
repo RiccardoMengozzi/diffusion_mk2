@@ -14,6 +14,7 @@
 import numpy as np
 import zarr
 import torch
+from diffusion_mk2.model.normalization import DloDataProcessor, ActionDataProcessor
 
 def create_sample_indices(
         episode_ends:np.ndarray, sequence_length:int,
@@ -84,25 +85,25 @@ def sample_sequence(train_data, sequence_length,
     return result
 
 # normalize data
-def get_data_stats(data):
-    data = data.reshape(-1,data.shape[-1])
-    stats = {
-        'min': np.min(data, axis=0),
-        'max': np.max(data, axis=0)
-    }
-    return stats
+# def get_data_stats(data):
+#     data = data.reshape(-1,data.shape[-1])
+#     stats = {
+#         'min': np.min(data, axis=0),
+#         'max': np.max(data, axis=0)
+#     }
+#     return stats
 
-def normalize_data(data, stats):
-    # nomalize to [0,1]
-    ndata = (data - stats['min']) / (stats['max'] - stats['min'])
-    # normalize to [-1, 1]
-    ndata = ndata * 2 - 1
-    return ndata
+# def normalize_data(data, stats):
+#     # nomalize to [0,1]
+#     ndata = (data - stats['min']) / (stats['max'] - stats['min'])
+#     # normalize to [-1, 1]
+#     ndata = ndata * 2 - 1
+#     return ndata
 
-def unnormalize_data(ndata, stats):
-    ndata = (ndata + 1) / 2
-    data = ndata * (stats['max'] - stats['min']) + stats['min']
-    return data
+# def unnormalize_data(ndata, stats):
+#     ndata = (ndata + 1) / 2
+#     data = ndata * (stats['max'] - stats['min']) + stats['min']
+#     return data
 
 # dataset
 class PushTStateDataset(torch.utils.data.Dataset):
@@ -121,28 +122,18 @@ class PushTStateDataset(torch.utils.data.Dataset):
 
         # read from zarr dataset
         dataset_root = zarr.open(dataset_path, 'r')
-        print("Dataset root keys:", dataset_root.keys())
-        print("Dataset data keys:", dataset_root['data'].keys())
-        print("Dataset meta keys:", dataset_root['meta'].keys())
-        print("dataset length:", len(dataset_root['data']['action']))
-        print("episode ends length:", len(dataset_root['meta']['episode_ends']))
-        processed_dataset_root = self.preprocess(dataset_root)
-        print("Processed dataset root keys:", processed_dataset_root.keys())
-        print("Processed dataset data keys:", processed_dataset_root['data'].keys())
-        print("Processed dataset meta keys:", processed_dataset_root['meta'].keys())
-        print("Processed dataset length:", len(processed_dataset_root['data']['action']))
-        print("Processed episode ends length:", len(processed_dataset_root['meta']['episode_ends']))
+
 
         # All demonstration episodes are concatinated in the first dimension N
         train_data = {
             # (N, action_dim)
-            'action': processed_dataset_root['data']['action'][:],
+            'action': dataset_root['data']['action'][:],
             # (N, obs_dim)
-            'obs': processed_dataset_root['data']['state'][:]
+            'obs': dataset_root['data']['state'][:]
         }
         
         # Marks one-past the last index for each episode
-        episode_ends = processed_dataset_root['meta']['episode_ends'][:]
+        episode_ends = dataset_root['meta']['episode_ends'][:]
         self.episode_ends = episode_ends
         # compute start and end of each state-action sequence
         # also handles padding
@@ -154,71 +145,61 @@ class PushTStateDataset(torch.utils.data.Dataset):
             pad_after=action_horizon-1)
 
         # compute statistics and normalized data to [-1,1]
-        stats = dict()
-        normalized_train_data = dict()
-        for key, data in train_data.items():
-            stats[key] = get_data_stats(data)
-            normalized_train_data[key] = normalize_data(data, stats[key])
+        # stats = dict()
+        # normalized_train_data = dict()
+        # for key, data in train_data.items():
+        #     stats[key] = get_data_stats(data)
+        #     normalized_train_data[key] = normalize_data(data, stats[key])
+
+        normalized_train_data = self.normalize_data(train_data)
 
         self.indices = indices
-        self.stats = stats
         self.normalized_train_data = normalized_train_data
         self.pred_horizon = pred_horizon
         self.action_horizon = action_horizon
         self.obs_horizon = obs_horizon
 
 
-    def preprocess(self, dataset_root): 
-        second_segment = [self.obs_ee_dim, self.obs_ee_dim + self.obs_dlo_dim]
-        third_segment = [second_segment[1], second_segment[1] + self.obs_target_dim]
+    def normalize_data(self, data):
+        actions = data['action']
+        states = data['obs']
 
-        # Load full arrays into memory
-        states = dataset_root['data']['state'][:]
-        actions = dataset_root['data']['action'][:]
+        initial_shape_range = [self.obs_ee_dim, self.obs_ee_dim + self.obs_dlo_dim]
+        final_shape_range = [initial_shape_range[0] + self.obs_dlo_dim,
+                             initial_shape_range[1] + self.obs_target_dim]
 
-        init_shapes = states[:, second_segment[0]:second_segment[1]].reshape(-1, 15, 3)
-        final_shapes = states[:, third_segment[0]:third_segment[1]].reshape(-1, 15, 3)
+        ee_states = states[:, :self.obs_ee_dim]
+        initial_shapes = states[:, initial_shape_range[0]:initial_shape_range[1]].reshape(-1, self.obs_dlo_dim // 3, 3)
+        final_shapes = states[:, final_shape_range[0]:final_shape_range[1]].reshape(-1, self.obs_target_dim // 3, 3)
 
-        threshold = 1e-3  # Very small distance below which we assume collapse
+        initial_shapes_processor = DloDataProcessor(initial_shapes)
+        final_shapes_processor = DloDataProcessor(final_shapes)
+        actions_processor = ActionDataProcessor(actions, initial_shapes.shape[1])
 
-        def has_close_points(shape_array):
-            """Check if any pair of points in a shape are closer than threshold."""
-            diff = shape_array[:, :, None, :] - shape_array[:, None, :, :]  # (B, 15, 15, 3)
-            dists = np.linalg.norm(diff, axis=-1)  # (B, 15, 15)
-            # Set diagonal to a large value to ignore self-comparison
-            np.fill_diagonal(dists.reshape(-1, 15, 15), np.inf)
-            min_dist = dists.min(axis=(1, 2))  # Minimum distance between any two points per sample
-            return min_dist < threshold  # Boolean mask
+        norm_factors = initial_shapes_processor.compute_normalize_factors_arrays()
 
-        init_bad = has_close_points(init_shapes)
-        final_bad = has_close_points(final_shapes)
+        initial_shapes_processor.set_normalize_factors_arrays(*norm_factors)
+        final_shapes_processor.set_normalize_factors_arrays(*norm_factors)
+        actions_processor.set_normalize_factors_arrays(*norm_factors)
 
-        # Discard if either init or final shape is bad
-        mask = ~(init_bad | final_bad)
+        initial_shapes_n, init_shapes_nans = initial_shapes_processor.preprocess()
+        final_shapes_n, final_shapes_nans = final_shapes_processor.preprocess()
+        actions_n = actions_processor.preprocess()
 
-        # Filter data
-        filtered_dataset = {
-            'data': {
-                'state': states[mask],
-                'action': actions[mask],
-            }
+        initial_shapes_n = initial_shapes_n.reshape(-1, self.obs_dlo_dim)
+        final_shapes_n = final_shapes_n.reshape(-1, self.obs_target_dim)
+
+        states_n = np.concatenate([
+            ee_states,
+            initial_shapes_n,
+            final_shapes_n
+        ], axis=1)
+
+
+        return {
+            'action': actions_n,
+            'obs': states_n,
         }
-
-        # Recompute episode ends
-        original_ends = dataset_root['meta']['episode_ends'][:]
-        valid_idx = np.nonzero(mask)[0]
-
-        new_episode_ends = []
-        current_start = 0
-        for end in original_ends:
-            count = np.sum((valid_idx >= current_start) & (valid_idx < end))
-            current_start = end
-            if count > 0:
-                new_episode_ends.append(count + (new_episode_ends[-1] if new_episode_ends else 0))
-
-        filtered_dataset['meta'] = {'episode_ends': np.array(new_episode_ends, dtype=np.int32)}
-        return filtered_dataset
-
 
     def __len__(self):
         # all possible segments of the dataset

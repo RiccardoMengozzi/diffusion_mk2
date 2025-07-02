@@ -28,25 +28,13 @@ def create_zarr_from_npz(npz_path: str, zarr_path: str):
     """
     # 1) Load arrays from .npz or .jsonl
     observations = []
+    idxs        = []
     actions      = []
     episode_ends = []
 
-    #### NPZ #####
-    if filename.endswith(".npz"):
-        
-        data = np.load(npz_path)
-        if "observations" not in data or "actions" not in data or "episode_ends" not in data:
-            raise KeyError(
-                "The .npz must contain exactly these three keys: "
-                "'observations', 'actions', and 'episode_ends'."
-            )
-
-        observations = data["observations"]    # shape (N, O+1, 2)
-        actions      = data["actions"]         # shape (N, 2)
-        episode_ends  = data["episode_ends"]   # shape (E,)
 
     #### JSONL ####
-    elif filename.endswith(".jsonl"):
+    if filename.endswith(".jsonl"):
         with open(filename, 'r') as f:
             for line in f:
                 try:
@@ -57,6 +45,7 @@ def create_zarr_from_npz(npz_path: str, zarr_path: str):
                         obs_ee = np.array(data["obs_ee"])
                         obs_dlo = np.array(data["obs_dlo"])
                         obs_target = np.array(data["obs_target"])
+                        idx = np.array(data["action_from_grasp_to_release"][0])
                         act = np.array(data["action"])
 
                         obs_ee = obs_ee.flatten()
@@ -68,7 +57,9 @@ def create_zarr_from_npz(npz_path: str, zarr_path: str):
                             [obs_ee, obs_dlo, obs_target], axis=-1
                         )
 
+
                         observations.append(obs)
+                        idxs.append(idx)
                         actions.append(act)
                         
                     elif data.get("type") == "episode_end":
@@ -84,6 +75,7 @@ def create_zarr_from_npz(npz_path: str, zarr_path: str):
             raise ValueError("No valid observation/action pairs found in JSON file")
 
         observations = np.array(observations, dtype=np.float32)
+        idxs = np.array(idxs, dtype=np.int64)
         actions = np.array(actions, dtype=np.float32)
         episode_ends = np.array(episode_ends, dtype=np.int64)
 
@@ -121,6 +113,7 @@ def create_zarr_from_npz(npz_path: str, zarr_path: str):
 
     state_chunks  = (chunk_samples, obs_dim)
     action_chunks = (chunk_samples, act_dim)
+    idx_chunks    = (chunk_samples,)
 
     # 7) Create the two datasets under data/
     data_grp.create_dataset(
@@ -138,6 +131,14 @@ def create_zarr_from_npz(npz_path: str, zarr_path: str):
         compressor=zarr.Blosc(cname="zstd", clevel=3),
     )
 
+    data_grp.create_dataset(
+        name="idx",
+        shape=(N_obs,),
+        chunks=idx_chunks,
+        dtype="int64",
+        compressor=zarr.Blosc(cname="zstd", clevel=3),
+    )
+
     # 8) Create the episode_ends dataset under meta/
     meta_grp.create_dataset(
         name="episode_ends",
@@ -149,11 +150,13 @@ def create_zarr_from_npz(npz_path: str, zarr_path: str):
     # 9) Write data into the Zarr datasets
     data_grp["state"][:]  = obs_flat
     data_grp["action"][:] = act_flat
+    data_grp["idx"][:]    = idxs
     # episode_ends was passed to create_dataset, so it’s already stored
 
     zstore.close()
     print(f"Successfully wrote Zarr‐Zip store to: {zarr_path}")
     print(f"  data/state    shape = {obs_flat.shape}, dtype=float32")
+    print(f"  data/idx      shape = {idxs.shape}, dtype=int64")
     print(f"  data/action   shape = {act_flat.shape}, dtype=float32")
     print(f"  meta/episode_ends shape = {ep_ends.shape}, dtype=int64")
 

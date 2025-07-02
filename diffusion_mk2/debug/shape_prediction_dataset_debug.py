@@ -62,11 +62,11 @@ if __name__ == "__main__":
         cs0, csR = dlo_0_processor._compute_normalize_factors(dlo_0)
         dlo_0_n = dlo_0_processor.normalize(dlo_0, cs0, csR)
         dlo_1_n = dlo_1_processor.normalize(dlo_1, cs0, csR)
-        action_n = action_processor.normalize(action, cs0, csR)
+        action_n = action_processor.normalize(action, csR)
 
         dlo_0_dn = dlo_0_processor.denormalize(dlo_0_n, cs0, csR)
         dlo_1_dn = dlo_1_processor.denormalize(dlo_1_n, cs0, csR)
-        action_dn = action_processor.denormalize(action_n, cs0, csR)
+        action_dn = action_processor.denormalize(action_n, csR)
 
 
         # Print diagnostics

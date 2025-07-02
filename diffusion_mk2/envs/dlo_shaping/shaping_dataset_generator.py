@@ -11,7 +11,10 @@ from diffusion_mk2.dataset.data_logger import JSONLDataLoggerDiffusion
 from scipy.spatial.transform import Rotation as R
 
 
-
+np.set_printoptions(precision=4,    # number of decimal places
+                    suppress=True,  # suppress scientific notation
+                    linewidth=100,  # characters per line
+                    threshold=1000) # controls summarization of large arrays
 
 
 PROJECT_FOLDER = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
@@ -181,7 +184,6 @@ class GripperDataGenerator():
         self.action_from_grasp_to_release = None
         self.idx = None  # Index of the particle to grasp
 
-
     def _step(self):
         start_time = time.time()
 
@@ -231,6 +233,11 @@ class GripperDataGenerator():
 
         self.franka.set_qpos(qpos)
         self._step()
+        
+        self.previous_pos_ee = self.end_effector.get_pos().cpu().numpy()
+        self.previous_theta = R.from_quat(self.end_effector.get_quat().cpu().numpy()).as_euler('xyz')[0]
+        self.previous_finger_qpos = self.franka.get_qpos().cpu().numpy()[-1]
+
 
 
 
@@ -257,8 +264,19 @@ class GripperDataGenerator():
         pos_ee = self.end_effector.get_pos().cpu().numpy()
         theta = R.from_quat(self.end_effector.get_quat().cpu().numpy()).as_euler('xyz')[0]
         finger_qpos = self.franka.get_qpos().cpu().numpy()[-1]
+        print("previous pos_ee:", self.previous_pos_ee)
+        print("current pos_ee:", pos_ee)
 
-        action = np.array([pos_ee[0], pos_ee[1], pos_ee[2], theta, finger_qpos])
+        delta_pos = pos_ee - self.previous_pos_ee
+        delta_theta = theta - self.previous_theta
+        delta_finger_qpos = finger_qpos - self.previous_finger_qpos
+
+        self.previous_pos_ee = pos_ee
+        self.previous_theta = theta
+        self.previous_finger_qpos = finger_qpos
+
+        action = np.array([delta_pos[0], delta_pos[1], delta_pos[2], delta_theta, delta_finger_qpos])
+        print("Action:", action)
         return action
 
  
