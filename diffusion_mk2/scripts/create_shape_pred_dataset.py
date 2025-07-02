@@ -8,8 +8,8 @@ import json
 # ------------------------------------------------------------
 
 project_dir   = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-filename  = os.path.join(project_dir, "json_data", "test.jsonl")
-zarr_filename = os.path.join(project_dir, "zarr_data/shape_prediction.zarr.zip")
+filename  = os.path.join(project_dir, "json_data", "combined_dataset_better.jsonl")
+zarr_filename = os.path.join(project_dir, "zarr_data/shape_prediction_better.zarr.zip")
 
 # ------------------------------------------------------------
 
@@ -127,5 +127,5 @@ def create_zarr_from_jsonl(npz_path: str, zarr_path: str):
 
 
 if __name__ == "__main__":
-    print("==> Reading pushing_dataset.npz and writing to Zarr‐Zip …")
+    print(f"==> Reading {filename} and writing to {zarr_filename} …")
     create_zarr_from_jsonl(npz_path=filename, zarr_path=zarr_filename)
