@@ -8,8 +8,6 @@ from diffusion_mk2.dataset.shape_prediction_dataset import DloDataset
 
 MAIN_DIR = os.path.join(os.path.dirname(__file__), "..")
 
-PARAMS = np.array([0.2, 0.4, 0.02])[np.newaxis]  # kb, kd, mass
-
 DATA_PATH = "/home/mengo/Research/LLM_DOM/diffusion_mk2/zarr_data/shape_prediction.zarr.zip"
 CHECKPOINT_PATH = "/home/mengo/Research/LLM_DOM/diffusion_mk2/checkpoints/shape_prediction/final_model.pth"
 
@@ -28,7 +26,6 @@ model.load_state_dict(state["model"])
 
 loss_fcn = lambda x, y: torch.mean(torch.linalg.norm(x - y, axis=-1))
 
-params_fixed = torch.from_numpy(PARAMS).float()
 
 
 ##############################
