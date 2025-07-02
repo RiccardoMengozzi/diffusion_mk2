@@ -97,8 +97,8 @@ class GripperDataGenerator():
                 show_world_frame=True,
             ),
             mpm_options=gs.options.MPMOptions(
-                lower_bound=(0.1, -0.4, HEIGHT_OFFSET - 0.05),
-                upper_bound=(0.9, 0.4, HEIGHT_OFFSET + 0.1),
+                lower_bound=(0.0, -0.5, HEIGHT_OFFSET - 0.05),
+                upper_bound=(1.0, 0.5, HEIGHT_OFFSET + 0.1),
                 grid_density=MPM_GRID_DENSITY,
             ),
             show_FPS=self.show_fps,

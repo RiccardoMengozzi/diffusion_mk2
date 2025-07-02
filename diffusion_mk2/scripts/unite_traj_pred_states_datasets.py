@@ -87,9 +87,9 @@ def combine_datasets_to_jsonl(input_pattern: str = "json_data/prova_*.jsonl", ou
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input_pattern", type=str, default="json_data/dataset*.jsonl", 
+    parser.add_argument("--input_pattern", type=str, default="json_data/test_first_*.jsonl", 
                        help="Pattern to match input JSONL files (e.g., 'json_data/prova_*.jsonl')")
-    parser.add_argument("--output_name", type=str, default="json_data/combined_dataset_better.jsonl", 
+    parser.add_argument("--output_name", type=str, default="json_data/combined_dataset_test_first.jsonl", 
                        help="Path for combined output (will be saved as .jsonl)")
     
     args = parser.parse_args()
