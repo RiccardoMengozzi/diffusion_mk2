@@ -189,16 +189,27 @@ class GripperDataGenerator():
         end_time = time.time()
         self.real_time_factor = DT / (end_time - start_time)
 
-    def reset_rope_pos(self):
+    def reset_rope_pose(self):
         rope_pos = self.rope_init_pos
         rope_pos[:, 0] += np.random.uniform(-0.025, 0.025)  # Randomize x position slightly
         rope_pos[:, 1] += np.random.uniform(-0.025, 0.025)  # Randomize y position slightly
         self.rope.set_pos(self.rope._sim.cur_substep_local, self.rope_init_pos)
 
+    def reset_rope_center_position(self):
+        rope_center = np.mean(self.rope.get_particles(), axis=0)
+        current_pos = self.rope.get_particles()
+        reset_pos = current_pos - rope_center + ROPE_BASE_POSITION
+        self.rope.set_pos(self.rope._sim.cur_substep_local, reset_pos)
+
     def reset(self, reset_rope_position=False):
         """Reset the environment for a new episode."""
         if reset_rope_position:
-            self.reset_rope_pos()
+            # Resettin completely the rope
+            self.reset_rope_pose()
+        else:
+            # Only resetting the rope in the center of the workspace, maintaining shape
+            self.reset_rope_center_position()
+
         self.scene.clear_debug_objects()
 
         # Place robot aboce centre of the rope
