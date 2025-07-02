@@ -23,7 +23,7 @@ def plot_shape(ax, dlo_0, title=None):
 
 
 if __name__ == "__main__":
-    dataset_path = "/home/mengo/Research/LLM_DOM/diffusion_mk2/zarr_data/pushing_dataset_better.zip"
+    dataset_path = "/home/mengo/Research/LLM_DOM/diffusion_mk2/zarr_data/pushing_dataset_test_first.zarr.zip"
     obs_ee_dim = 5
     obs_shape_dim = 45
     obs_target_dim = 45
@@ -40,7 +40,7 @@ if __name__ == "__main__":
     dlo_processor = DloDataProcessor(init_shapes)
 
 
-    indices = np.random.choice(len(init_shapes), size=20, replace=False)
+    indices = np.random.choice(len(init_shapes), size=100, replace=False)
     random_init_shapes = init_shapes[indices]
 
     for i,shape in enumerate(random_init_shapes):
