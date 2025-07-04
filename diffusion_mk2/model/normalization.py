@@ -1,53 +1,85 @@
 import numpy as np
 
-
 class ActionDataProcessor():
-    def __init__(self, action_data, num_points):
+    def __init__(self, action_data, num_points, is_first_idx, is_last_gripper):
         self.action_data = action_data
         self.num_points = num_points
         self.cs0_list = None
         self.csR_list = None
+        self.is_first_idx = is_first_idx  # Whether the first component is an index
+        self.is_last_gripper = is_last_gripper  # Whether the last component is the
+        print("self.is_first_idx:", self.is_first_idx, "self.is_last_gripper:", self.is_last_gripper)
 
     def set_normalize_factors_arrays(self, cs0_list, csR_list):
         self.cs0_list = cs0_list
         self.csR_list = csR_list
 
-    def normalize(self, action, csR):
+    def normalize(self, action, csR, ):
         # Extract components - works for both 2D and 3D
-        idx = action[0]
-        spatial_components = action[1:-1]  # All spatial components (dx, dy) or (dx, dy, dz)
-        dtheta = action[-1]  # Last component is always rotation
-        
-        # Normalize index
-        idx_n = idx / (self.num_points - 1.0)
+        pos_start_idx, pos_last_idx = 0, -1
+        if self.is_first_idx:
+            idx = action[0]
+            # Normalize index
+            idx_n = idx / (self.num_points - 1.0)
+            pos_start_idx = 1
+        if self.is_last_gripper:
+            gripper_state = action[-1]  # Last component is gripper state
+            pos_last_idx = -2 
+
+        pos = action[pos_start_idx:pos_last_idx]  # All spatial components (dx, dy) or (dx, dy, dz)
+            
+        dtheta = action[pos_last_idx+1] 
+        print(f"pos_first_idx: {pos_start_idx}, pos_last_idx: {pos_last_idx}, pos_shape: {pos.shape}, self.is_first_idx: {self.is_first_idx}, self.is_last_gripper: {self.is_last_gripper}")
+
         
         # Normalize spatial components using rotation matrix
-        spatial_components_n = csR @ spatial_components
+        pos_n = csR @ pos
         
         # Rotation remains unchanged
         theta_n = dtheta
         
         # Reconstruct normalized action
-        return np.concatenate([[idx_n], spatial_components_n, [theta_n]])
+        if self.is_first_idx and self.is_last_gripper:
+            return np.concatenate([[idx_n], pos_n, [theta_n], [gripper_state]])
+        elif self.is_first_idx:
+            return np.concatenate([[idx_n], pos_n, [theta_n]])
+        elif self.is_last_gripper:
+            return np.concatenate([pos_n, [theta_n], [gripper_state]])
+        else:
+            return np.concatenate([pos_n, [theta_n]])
 
         
     def denormalize(self, action_n, csR):
-        # Extract components
-        idx_n = action_n[0]
-        spatial_components_n = action_n[1:-1]  # All spatial components
-        dtheta_n = action_n[-1]
-        
-        # Denormalize index
-        idx = idx_n * (self.num_points - 1.0)
+        pos_start_idx, pos_last_idx = 0, -1
+        if self.is_first_idx:
+            idx_n = action_n[0]
+            # denormalize index
+            idx = idx_n * (self.num_points - 1.0)
+            pos_start_idx = 1
+        if self.is_last_gripper:
+            gripper_state = action_n[-1]  # Last component is gripper state
+            pos_last_idx = -2 
+
+        pos_n = action_n[pos_start_idx:pos_last_idx]  # All spatial components (dx, dy) or (dx, dy, dz)
+            
+        dtheta_n = action_n[pos_last_idx+1] 
         
         # Denormalize spatial components
-        spatial_components = csR.T @ spatial_components_n
+        pos = csR.T @ pos_n
         
         # Rotation remains unchanged
         theta = dtheta_n
         
         # Reconstruct denormalized action
-        return np.concatenate([[idx], spatial_components, [theta]])
+        if self.is_first_idx and self.is_last_gripper:
+            return np.concatenate([[idx], pos, [theta], [gripper_state]])
+        elif self.is_first_idx:
+            return np.concatenate([[idx], pos, [theta]])
+        elif self.is_last_gripper:
+            return np.concatenate([pos, [theta], [gripper_state]])
+        else:
+            return np.concatenate([pos, [theta]])
+
 
     def preprocess(self):
         if self.cs0_list is None or self.csR_list is None:
@@ -60,6 +92,61 @@ class ActionDataProcessor():
         
         return np.array(processed_action_data)
 
+class EEStateDataProcessor():
+    def __init__(self, ee_state_data):
+        self.ee_state_data = ee_state_data
+        self.cs0_list = None
+        self.csR_list = None
+
+    def set_normalize_factors_arrays(self, cs0_list, csR_list):
+        self.cs0_list = cs0_list
+        self.csR_list = csR_list
+
+    def normalize(self, ee_state, cs0, csR):
+        # Extract components - works for both 2D and 3D
+        pos = ee_state[0:-2]  # All spatial components (x, y) or (x, y, z) and theta
+        theta = ee_state[-2]  # second last component is always rotation, last component is gripper state
+        gripper_state = ee_state[-1]  # Last component is gripper state (open/close)
+
+    
+        pos_centered = pos - cs0     # subtract the mean/centroid
+        pos_n = (csR @ pos_centered.T).T  
+        pos_n = pos_n.flatten()  # Ensure it's a flat array
+
+        # Rotation remains unchanged
+        theta_n = theta
+        # Reconstruct normalized action
+        return np.concatenate([pos_n, [theta_n], [gripper_state]])  # Keep gripper state unchanged
+
+        
+    def denormalize(self, ee_state_n, cs0, csR):
+        # Extract components
+        pos_n = ee_state_n[0:-2]  # All spatial components
+        theta_n = ee_state_n[-2]
+        gripper_state = ee_state_n[-1]  # Last component is gripper state (open/close)
+        
+        pos_centered = (csR.T @ pos_n.T).T  
+        # inverse-translate
+        pos = pos_centered + cs0
+        pos = pos.flatten()  # Ensure it's a flat array
+
+        # Rotation remains unchanged
+        theta = theta_n
+        
+        # Reconstruct denormalized action
+        return np.concatenate([pos, [theta], [gripper_state]])  # Keep gripper state unchanged
+
+    def preprocess(self):
+        if self.cs0_list is None or self.csR_list is None:
+            raise ValueError("Normalization factors not set. Call set_normalize_factors_arrays() first.")
+        
+        processed_ee_state_data = []
+        for ee_state, cs0, csR in zip(self.ee_state_data, self.cs0_list, self.csR_list):
+            ee_state_n = self.normalize(ee_state, cs0, csR)  # Note: removed cs0 parameter as it wasn't used
+            processed_ee_state_data.append(ee_state_n)
+        
+        return np.array(processed_ee_state_data)
+    
 
 class DloDataProcessor():
     def __init__(self, dlo_data):
@@ -107,6 +194,7 @@ class DloDataProcessor():
             
     def denormalize(self, dlo, cs0, csR):
         # Matrix operations work for any number of dimensions
+        dlo = dlo.squeeze()  # Ensure dlo is 2D
         dlo_dn = (csR.T @ dlo.T).T + cs0
         return dlo_dn
 
