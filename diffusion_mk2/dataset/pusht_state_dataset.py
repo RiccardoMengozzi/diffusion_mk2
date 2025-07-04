@@ -14,7 +14,7 @@
 import numpy as np
 import zarr
 import torch
-from diffusion_mk2.model.normalization import DloDataProcessor, ActionDataProcessor
+from diffusion_mk2.model.normalization import DloDataProcessor, ActionDataProcessor, EEStateDataProcessor
 
 def create_sample_indices(
         episode_ends:np.ndarray, sequence_length:int,
@@ -174,23 +174,32 @@ class PushTStateDataset(torch.utils.data.Dataset):
 
         initial_shapes_processor = DloDataProcessor(initial_shapes)
         final_shapes_processor = DloDataProcessor(final_shapes)
-        actions_processor = ActionDataProcessor(actions, initial_shapes.shape[1])
+        ee_states_processor = EEStateDataProcessor(ee_states)
+        actions_processor = ActionDataProcessor(actions, initial_shapes.shape[1],  is_first_idx=False, is_last_gripper=True)
 
         norm_factors = initial_shapes_processor.compute_normalize_factors_arrays()
 
+
         initial_shapes_processor.set_normalize_factors_arrays(*norm_factors)
         final_shapes_processor.set_normalize_factors_arrays(*norm_factors)
+        ee_states_processor.set_normalize_factors_arrays(*norm_factors)
         actions_processor.set_normalize_factors_arrays(*norm_factors)
 
         initial_shapes_n, init_shapes_nans = initial_shapes_processor.preprocess()
         final_shapes_n, final_shapes_nans = final_shapes_processor.preprocess()
+        ee_states_n = ee_states_processor.preprocess()
         actions_n = actions_processor.preprocess()
 
         initial_shapes_n = initial_shapes_n.reshape(-1, self.obs_dlo_dim)
         final_shapes_n = final_shapes_n.reshape(-1, self.obs_target_dim)
+        ee_states_n = ee_states_n.reshape(-1, self.obs_ee_dim)
+
+        print("initial_shapes_n shape:", initial_shapes_n.shape)
+        print("final_shapes_n shape:", final_shapes_n.shape)
+        print("ee_states_n shape:", ee_states_n.shape)
 
         states_n = np.concatenate([
-            ee_states,
+            ee_states_n,
             initial_shapes_n,
             final_shapes_n
         ], axis=1)
@@ -228,7 +237,7 @@ class PushTStateDataset(torch.utils.data.Dataset):
 if __name__ == "__main__":
     # Example usage
     dataset = PushTStateDataset(
-        dataset_path="/home/mengo/Research/LLM_DOM/diffusion_mk2/zarr_data/combined_pushing_dataset.zarr.zip",
+        dataset_path="/home/mengo/Research/LLM_DOM/diffusion_mk2/zarr_data/test.zarr.zip",
         pred_horizon=16,
         obs_horizon=2,
         action_horizon=8,
@@ -244,5 +253,5 @@ if __name__ == "__main__":
     # print("Sample obs shape:", sample['obs'].shape)
     # print("Sample action shape:", sample['action'].shape)
     # print("Stats:", dataset.stats)
-    # print("First 20 obs:", sample['obs'])
+    # print("First 20 obs:", sample['obs']) 
     # print("First 20 actions:", sample['action'][:20])

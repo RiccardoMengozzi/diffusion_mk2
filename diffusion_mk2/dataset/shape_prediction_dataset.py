@@ -25,7 +25,7 @@ class DloDataset(Dataset):
     def preprocess(self, initial_shapes, final_shapes, actions):
         initial_shapes_processor = DloDataProcessor(initial_shapes[:, :, :2])
         final_shapes_processor = DloDataProcessor(final_shapes[:, :, :2])
-        actions_processor = ActionDataProcessor(actions, self.num_points)
+        actions_processor = ActionDataProcessor(actions, self.num_points, is_first_idx=True, is_last_gripper=False)
 
         norm_factors = initial_shapes_processor.compute_normalize_factors_arrays()
 
