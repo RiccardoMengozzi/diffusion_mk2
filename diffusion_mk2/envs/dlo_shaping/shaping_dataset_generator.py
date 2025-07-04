@@ -40,7 +40,7 @@ ROPE_RESET_INTERVAL = 3 # episodes
 
 EE_VELOCITY = 0.02
 EE_ANG_VELOCITY = 0.2
-SAVE_DATA_INTERVAL = 6 # 
+SAVE_DATA_INTERVAL = 10 # 
 CLOSE_GRIPPER_POSITION = 0.00   
 OPEN_GRIPPER_POSITION = 0.01  
 MAX_ACTION_DISPLACEMENT = 0.035  # Maximum displacement in x and y
@@ -183,6 +183,7 @@ class GripperDataGenerator():
         self.episode_actions = []
         self.action_from_grasp_to_release = None
         self.idx = None  # Index of the particle to grasp
+        self.previous_obs_ee = None  # Previous end effector observation
 
     def _step(self):
         start_time = time.time()
@@ -234,13 +235,6 @@ class GripperDataGenerator():
         self.franka.set_qpos(qpos)
         self._step()
         
-        self.previous_pos_ee = self.end_effector.get_pos().cpu().numpy()
-        self.previous_theta = R.from_quat(self.end_effector.get_quat().cpu().numpy()).as_euler('xyz')[0]
-        self.previous_finger_qpos = self.franka.get_qpos().cpu().numpy()[-1]
-
-
-
-
 
     def get_observation(self):
         pos_ee = self.end_effector.get_pos().cpu().numpy()
@@ -248,11 +242,11 @@ class GripperDataGenerator():
         finger_qpos = self.franka.get_qpos().cpu().numpy()[-1]
         obs_ee = np.array([pos_ee[0], pos_ee[1], pos_ee[2], theta, finger_qpos])
 
-        # self.scene.draw_debug_sphere(
-        #     pos=np.array([obs_ee[0], obs_ee[1], obs_ee[2] - EE_OFFSET]),
-        #     radius=0.001,
-        #     color=(1, 0, 0, 1),  # Red color for end effector
-        # )
+        self.scene.draw_debug_sphere(
+            pos=np.array([obs_ee[0], obs_ee[1], obs_ee[2] - EE_OFFSET]),
+            radius=0.001,
+            color=(1, 0, 0, 1),  # Red color for end effector
+        )
         obs_dlo = dlo_utils.get_skeleton(self.rope.get_particles(),
                                             downsample_number=NUMBER_OF_PARTICLES,
                                             average_number=PARTICLES_NUMBER_FOR_POS_SMOOTHING)
@@ -260,23 +254,56 @@ class GripperDataGenerator():
 
         return obs_ee, obs_dlo
 
-    def get_action(self):
-        pos_ee = self.end_effector.get_pos().cpu().numpy()
-        theta = R.from_quat(self.end_effector.get_quat().cpu().numpy()).as_euler('xyz')[0]
-        finger_qpos = self.franka.get_qpos().cpu().numpy()[-1]
-        print("previous pos_ee:", self.previous_pos_ee)
-        print("current pos_ee:", pos_ee)
+    def get_action(self, current_obs_ee):
+        # pos_ee = self.end_effector.get_pos().cpu().numpy()
+        # theta = R.from_quat(self.end_effector.get_quat().cpu().numpy()).as_euler('xyz')[0]
+        # finger_qpos = self.franka.get_qpos().cpu().numpy()[-1]
+        # print("previous pos_ee:", self.previous_pos_ee)
+        # print("current pos_ee:", pos_ee)
 
-        delta_pos = pos_ee - self.previous_pos_ee
-        delta_theta = theta - self.previous_theta
-        delta_finger_qpos = finger_qpos - self.previous_finger_qpos
+        # delta_pos = pos_ee - self.previous_pos_ee
+        # delta_theta = theta - self.previous_theta
+        # delta_finger_qpos = finger_qpos - self.previous_finger_qpos
 
-        self.previous_pos_ee = pos_ee
-        self.previous_theta = theta
-        self.previous_finger_qpos = finger_qpos
+        # self.scene.draw_debug_sphere(
+        #     pos=np.array([delta_pos[0] + self.previous_pos_ee[0], delta_pos[1] + self.previous_pos_ee[1], delta_pos[2] + self.previous_pos_ee[2] - EE_OFFSET]),
+        #     radius=0.001,
+        #     color=(0, 1, 0, 1),  # Red color for end effector
+        # )
 
-        action = np.array([delta_pos[0], delta_pos[1], delta_pos[2], delta_theta, delta_finger_qpos])
-        print("Action:", action)
+        # self.previous_pos_ee = pos_ee
+        # self.previous_theta = theta
+        # self.previous_finger_qpos = finger_qpos
+
+
+
+        # action = np.array([delta_pos[0], delta_pos[1], delta_pos[2], delta_theta, delta_finger_qpos])
+        # print("Action:", action)
+
+        # simpy save previous obs as action:
+        if self.previous_obs_ee is None:
+            self.previous_obs_ee = current_obs_ee
+            return np.zeros(5)
+
+        px, py, pz, ptheta, pfinger_qpos = self.previous_obs_ee
+        x, y, z, theta, finger_qpos = current_obs_ee
+
+        dx = x - px
+        dy = y - py
+        dz = z - pz
+        dtheta = theta - ptheta
+        dfinger_qpos = finger_qpos - pfinger_qpos
+
+
+        self.scene.draw_debug_sphere(
+            pos=np.array([px + dx, py + dy, pz + dz - EE_OFFSET]),
+            radius=0.001,
+            color=(0, 1, 0, 1),  # Red color for end effector
+        )
+
+
+
+        action = np.array([dx, dy, dz, dtheta, dfinger_qpos])
         return action
 
  
@@ -320,6 +347,9 @@ class GripperDataGenerator():
             # If we are saving data, get the observation
             if self.step_counter % SAVE_DATA_INTERVAL == 0 and save_data:
                 obs_ee, obs_dlo = self.get_observation()
+                action = self.get_action(obs_ee)
+                self.data_logger.append_data(obs_ee, obs_dlo, obs_dlo, action, self.action_from_grasp_to_release)  # No action yet
+                self.previous_obs_ee = obs_ee
 
             self.franka.control_dofs_position(p[:-2], self.motors_dof)
             if force_control:
@@ -329,10 +359,10 @@ class GripperDataGenerator():
             self._step()
 
             # If we are saving data, get the action and append data
-            if self.step_counter % SAVE_DATA_INTERVAL == 0 and save_data:
-                action = self.get_action()
-                # target will be changed at the end of the action
-                self.data_logger.append_data(obs_ee, obs_dlo, obs_dlo, action, self.action_from_grasp_to_release) 
+            # if self.step_counter % SAVE_DATA_INTERVAL == 0 and save_data:
+            #     action = self.get_action()
+            #     # target will be changed at the end of the action
+            #     self.data_logger.append_data(obs_ee, obs_dlo, obs_dlo, action, self.action_from_grasp_to_release) 
             
             # Update global step counter
             self.step_counter += 1
