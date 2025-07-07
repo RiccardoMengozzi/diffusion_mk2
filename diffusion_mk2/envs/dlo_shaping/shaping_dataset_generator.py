@@ -184,6 +184,7 @@ class GripperDataGenerator():
         self.action_from_grasp_to_release = None
         self.idx = None  # Index of the particle to grasp
         self.previous_obs_ee = None  # Previous end effector observation
+        self.is_first_episode_step = True
 
     def _step(self):
         start_time = time.time()
@@ -206,6 +207,7 @@ class GripperDataGenerator():
 
     def reset(self, reset_rope_position=False):
         """Reset the environment for a new episode."""
+        self.is_first_episode_step = True
         if reset_rope_position:
             # Resettin completely the rope
             self.reset_rope_pose()
@@ -281,8 +283,9 @@ class GripperDataGenerator():
         # print("Action:", action)
 
         # simpy save previous obs as action:
-        if self.previous_obs_ee is None:
+        if self.previous_obs_ee is None or self.is_first_episode_step:
             self.previous_obs_ee = current_obs_ee
+            self.is_first_episode_step = False
             return np.zeros(5)
 
         px, py, pz, ptheta, pfinger_qpos = self.previous_obs_ee

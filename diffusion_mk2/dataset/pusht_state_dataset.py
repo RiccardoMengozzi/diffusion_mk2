@@ -119,7 +119,6 @@ class PushTStateDataset(torch.utils.data.Dataset):
         self.obs_ee_dim = obs_ee_dim
         self.obs_dlo_dim = obs_dlo_dim
         self.obs_target_dim = obs_target_dim
-
         # read from zarr dataset
         dataset_root = zarr.open(dataset_path, 'r')
 
@@ -151,13 +150,18 @@ class PushTStateDataset(torch.utils.data.Dataset):
         #     stats[key] = get_data_stats(data)
         #     normalized_train_data[key] = normalize_data(data, stats[key])
 
-        normalized_train_data = self.normalize_data(train_data)
+        self.initial_shapes_processor = None
+        self.final_shapes_processor = None
+        self.ee_states_processor = None
+        self.actions_processor = None
+
 
         self.indices = indices
-        self.normalized_train_data = normalized_train_data
         self.pred_horizon = pred_horizon
         self.action_horizon = action_horizon
         self.obs_horizon = obs_horizon
+
+        self.normalized_train_data = self.normalize_data(train_data)
 
 
     def normalize_data(self, data):
@@ -172,31 +176,27 @@ class PushTStateDataset(torch.utils.data.Dataset):
         initial_shapes = states[:, initial_shape_range[0]:initial_shape_range[1]].reshape(-1, self.obs_dlo_dim // 3, 3)
         final_shapes = states[:, final_shape_range[0]:final_shape_range[1]].reshape(-1, self.obs_target_dim // 3, 3)
 
-        initial_shapes_processor = DloDataProcessor(initial_shapes)
-        final_shapes_processor = DloDataProcessor(final_shapes)
-        ee_states_processor = EEStateDataProcessor(ee_states)
-        actions_processor = ActionDataProcessor(actions, initial_shapes.shape[1],  is_first_idx=False, is_last_gripper=True)
+        self.initial_shapes_processor = DloDataProcessor(initial_shapes)
+        self.final_shapes_processor = DloDataProcessor(final_shapes)
+        self.ee_states_processor = EEStateDataProcessor(ee_states)
+        self.actions_processor = ActionDataProcessor(actions, initial_shapes.shape[1],  is_first_idx=False, is_last_gripper=True)
 
-        norm_factors = initial_shapes_processor.compute_normalize_factors_arrays()
+        norm_factors = self.initial_shapes_processor.compute_normalize_factors_arrays()
 
 
-        initial_shapes_processor.set_normalize_factors_arrays(*norm_factors)
-        final_shapes_processor.set_normalize_factors_arrays(*norm_factors)
-        ee_states_processor.set_normalize_factors_arrays(*norm_factors)
-        actions_processor.set_normalize_factors_arrays(*norm_factors)
+        self.initial_shapes_processor.set_normalize_factors_arrays(*norm_factors)
+        self.final_shapes_processor.set_normalize_factors_arrays(*norm_factors)
+        self.ee_states_processor.set_normalize_factors_arrays(*norm_factors)
+        self.actions_processor.set_normalize_factors_arrays(*norm_factors)
 
-        initial_shapes_n, init_shapes_nans = initial_shapes_processor.preprocess()
-        final_shapes_n, final_shapes_nans = final_shapes_processor.preprocess()
-        ee_states_n = ee_states_processor.preprocess()
-        actions_n = actions_processor.preprocess()
+        initial_shapes_n, init_shapes_nans = self.initial_shapes_processor.preprocess()
+        final_shapes_n, final_shapes_nans = self.final_shapes_processor.preprocess()
+        ee_states_n = self.ee_states_processor.preprocess()
+        actions_n = self.actions_processor.preprocess()
 
         initial_shapes_n = initial_shapes_n.reshape(-1, self.obs_dlo_dim)
         final_shapes_n = final_shapes_n.reshape(-1, self.obs_target_dim)
         ee_states_n = ee_states_n.reshape(-1, self.obs_ee_dim)
-
-        print("initial_shapes_n shape:", initial_shapes_n.shape)
-        print("final_shapes_n shape:", final_shapes_n.shape)
-        print("ee_states_n shape:", ee_states_n.shape)
 
         states_n = np.concatenate([
             ee_states_n,
