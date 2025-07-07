@@ -171,7 +171,7 @@ def plot_animated_comparison(ee_orig, dlo_orig, action_orig, ee_norm, dlo_norm, 
 
 def main():
     # Configuration
-    dataset_path = "/home/mengo/Research/LLM_DOM/diffusion_mk2/zarr_data/test.zarr.zip"
+    dataset_path = "/home/lar/Riccardo/diffusion_mk2/zarr_data/test.zarr.zip"
     obs_ee_dim = 5        # [x, y, z, θ, grip]
     obs_shape_dim = 45    # 15 points * 3
     obs_target_dim = 45

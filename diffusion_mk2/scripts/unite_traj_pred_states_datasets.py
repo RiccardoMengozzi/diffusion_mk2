@@ -64,7 +64,7 @@ def combine_datasets_to_jsonl(input_pattern: str = "json_data/prova_*.jsonl", ou
             
             total_observations_so_far += observations_in_current_file
             
-            print(f"  Added {observations_in_current_file} observations and {ep_ends_counter} episode ends {ep_ends} from {file_path}") # This count is a bit tricky, simpler to just say "lines"
+            print(f"  Added {observations_in_current_file} observations and {ep_ends_counter}from {file_path}") # This count is a bit tricky, simpler to just say "lines"
             
         except json.JSONDecodeError as e:
             print(f"  Error decoding JSON in {file_path} at line: {line.strip()}. Error: {e}")
@@ -87,9 +87,9 @@ def combine_datasets_to_jsonl(input_pattern: str = "json_data/prova_*.jsonl", ou
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--input_pattern", type=str, default="json_data/test_first_*.jsonl", 
+    parser.add_argument("--input_pattern", type=str, default="json_data/dataset_*.jsonl", 
                        help="Pattern to match input JSONL files (e.g., 'json_data/prova_*.jsonl')")
-    parser.add_argument("--output_name", type=str, default="json_data/combined_dataset_test_first.jsonl", 
+    parser.add_argument("--output_name", type=str, default="json_data/combined_dataset.jsonl", 
                        help="Path for combined output (will be saved as .jsonl)")
     
     args = parser.parse_args()
