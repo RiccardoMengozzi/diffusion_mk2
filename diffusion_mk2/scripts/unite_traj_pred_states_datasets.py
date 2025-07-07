@@ -64,7 +64,7 @@ def combine_datasets_to_jsonl(input_pattern: str = "json_data/prova_*.jsonl", ou
             
             total_observations_so_far += observations_in_current_file
             
-            print(f"  Added {observations_in_current_file} observations and {ep_ends_counter}from {file_path}") # This count is a bit tricky, simpler to just say "lines"
+            print(f"  Added {observations_in_current_file} observations and {ep_ends_counter} episodes from {file_path}") # This count is a bit tricky, simpler to just say "lines"
             
         except json.JSONDecodeError as e:
             print(f"  Error decoding JSON in {file_path} at line: {line.strip()}. Error: {e}")

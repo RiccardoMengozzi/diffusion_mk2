@@ -161,6 +161,7 @@ class PushTStateDataset(torch.utils.data.Dataset):
         self.action_horizon = action_horizon
         self.obs_horizon = obs_horizon
 
+        print("start data normalization...")
         self.normalized_train_data = self.normalize_data(train_data)
 
 
@@ -171,7 +172,6 @@ class PushTStateDataset(torch.utils.data.Dataset):
         initial_shape_range = [self.obs_ee_dim, self.obs_ee_dim + self.obs_dlo_dim]
         final_shape_range = [initial_shape_range[0] + self.obs_dlo_dim,
                              initial_shape_range[1] + self.obs_target_dim]
-
         ee_states = states[:, :self.obs_ee_dim]
         initial_shapes = states[:, initial_shape_range[0]:initial_shape_range[1]].reshape(-1, self.obs_dlo_dim // 3, 3)
         final_shapes = states[:, final_shape_range[0]:final_shape_range[1]].reshape(-1, self.obs_target_dim // 3, 3)
@@ -189,9 +189,13 @@ class PushTStateDataset(torch.utils.data.Dataset):
         self.ee_states_processor.set_normalize_factors_arrays(*norm_factors)
         self.actions_processor.set_normalize_factors_arrays(*norm_factors)
 
+        print("normalizing_init_shapes")
         initial_shapes_n, init_shapes_nans = self.initial_shapes_processor.preprocess()
+        print("normalizing target shapes")
         final_shapes_n, final_shapes_nans = self.final_shapes_processor.preprocess()
+        print("normalizing ee_states")
         ee_states_n = self.ee_states_processor.preprocess()
+        print("normalizing actions")
         actions_n = self.actions_processor.preprocess()
 
         initial_shapes_n = initial_shapes_n.reshape(-1, self.obs_dlo_dim)

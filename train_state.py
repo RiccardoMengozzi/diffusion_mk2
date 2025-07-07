@@ -19,7 +19,9 @@ from diffusion_mk2.dataset.pusht_state_dataset import PushTStateDataset
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 hyperparameters = {
-    "obs_dim": 95,
+    "obs_ee_dim": 5,
+    "obs_dlo_dim": 45,
+    "obs_target_dim": 45,
     "obs_horizon": 2,
     "action_dim": 5,
     "action_horizon": 8,
@@ -34,7 +36,7 @@ hyperparameters = {
     "device": torch.device("cuda"),  # Will default to CUDA if available
     "model_save_path": "",
     "checkpoint_save_interval": 100,  # Save checkpoint every N epochs
-    "dataset_path": os.path.join(PROJECT_DIR, "zarr_data", "combined_pushing_dataset.zarr.zip"),
+    "dataset_path": os.path.join(PROJECT_DIR, "zarr_data", "dataset_fixed.zarr.zip"),
 
     # wandb
     "project_name": "diffusion_model",
@@ -46,8 +48,10 @@ class DiffusionTrainer:
         self,
         config: dict,
     ):
-        
-        self.OBS_DIM = config.get("obs_dim", 32)
+        self.OBS_EE_DIM = config.get("obs_ee_dim", 5)
+        self.OBS_DLO_DIM = config.get("obs_dlo_dim", 45)
+        self.OBS_TARGET_DIM = config.get("obs_target_dim", 45)
+        self.OBS_DIM = self.OBS_EE_DIM + self.OBS_DLO_DIM + self.OBS_TARGET_DIM
         self.OBS_HORIZON = config.get("obs_horizon", 2)
         self.ACTION_DIM = config.get("action_dim", 2)
         self.ACTION_HORIZON = config.get("action_horizon", 8)   
@@ -73,7 +77,7 @@ class DiffusionTrainer:
             config=config,
             project=self.project_name,
             entity=self.entity,
-            mode="online"
+            mode="disabled"
         )
         if config.get("model_save_path") == "":
             # Default model save path if not specified
@@ -89,7 +93,10 @@ class DiffusionTrainer:
             dataset_path=self.DATASET_PATH,
             pred_horizon=self.PRED_HORIZON,
             obs_horizon=self.OBS_HORIZON,
-            action_horizon=self.ACTION_HORIZON
+            action_horizon=self.ACTION_HORIZON,
+            obs_ee_dim=self.OBS_EE_DIM,
+            obs_dlo_dim=self.OBS_DLO_DIM,
+            obs_target_dim=self.OBS_TARGET_DIM,
         )
         self.stats = self.dataset.stats
 
@@ -98,7 +105,7 @@ class DiffusionTrainer:
         self.dataloader = torch.utils.data.DataLoader(
             self.dataset,
             batch_size=self.BATCH_SIZE,
-            num_workers=1,
+            num_workers=10,
             shuffle=True,
             pin_memory=True,
             persistent_workers=True

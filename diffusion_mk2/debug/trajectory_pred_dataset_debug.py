@@ -1,6 +1,7 @@
 import zarr
 import torch
 import numpy as np
+from tqdm import tqdm
 import matplotlib.pyplot as plt
 from diffusion_mk2.model.normalization import (
     DloDataProcessor,
@@ -28,7 +29,7 @@ def load_dataset(dataset_path, obs_ee_dim, obs_shape_dim, obs_target_dim):
     dataloader = torch.utils.data.DataLoader(
         dataset,
         batch_size=1,
-        num_workers=1,
+        num_workers=10,
         shuffle=False,
         pin_memory=True,
         persistent_workers=True,
@@ -49,7 +50,7 @@ def extract_all_states(dataset_path, dataloader, obs_ee_dim, obs_shape_dim):
     proc_ee = []
     proc_dlo = []
     proc_action = []
-    for batch in dataloader:
+    for batch in tqdm(dataloader, desc="extracting data", total=len(dataloader)):
         proc_ee.append(batch["obs"][:, :, :obs_ee_dim].numpy().squeeze())
         proc_dlo.append(
             batch["obs"][:, :, obs_ee_dim : obs_ee_dim + obs_shape_dim]
@@ -173,15 +174,9 @@ def plot_animated_comparison(
 
 def main():
     # Configuration
-<<<<<<< HEAD
-    dataset_path = "/home/lar/Riccardo/diffusion_mk2/zarr_data/test.zarr.zip"
-    obs_ee_dim = 5        # [x, y, z, θ, grip]
-    obs_shape_dim = 45    # 15 points * 3
-=======
-    dataset_path = "/home/mengo/Research/LLM_DOM/diffusion_mk2/zarr_data/test.zarr.zip"
+    dataset_path = "/home/lar/Riccardo/diffusion_mk2/zarr_data/dataset_0.zarr.zip"
     obs_ee_dim = 5  # [x, y, z, θ, grip]
     obs_shape_dim = 45  # 15 points * 3
->>>>>>> 4572210552efdc8b292a38c0d8215cb231fe444e
     obs_target_dim = 45
 
     # Load and extract

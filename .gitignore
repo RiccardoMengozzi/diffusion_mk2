@@ -1,6 +1,7 @@
 **/__pycache__/
 wandb/
 json_data/
+zarr_data/
 *.pt
 *.pyc
 *.egg-info

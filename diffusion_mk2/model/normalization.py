@@ -1,5 +1,6 @@
 import numpy as np
 
+
 class ActionDataProcessor():
     def __init__(self, action_data, num_points, is_first_idx, is_last_gripper):
         self.action_data = action_data
@@ -130,7 +131,6 @@ class ActionDataProcessor():
         self.scale_min = np.min(processed_action_data, axis=0)
         self.scale_max = np.max(processed_action_data, axis=0)
 
-        print("action_norm_min_max:", self.scale_min, self.scale_max)
 
         scaled_processed_action_data = []
         for action in processed_action_data:
@@ -238,7 +238,6 @@ class EEStateDataProcessor():
         self.scale_min = np.min(processed_ee_state_data, axis=0)
         self.scale_max = np.max(processed_ee_state_data, axis=0)
 
-        print("ee_norm_min_max:", self.scale_min, self.scale_max)
 
         scaled_processed_ee_state_data = []
         for ee_state in processed_ee_state_data:
@@ -400,7 +399,7 @@ class DloDataProcessor():
             raise ValueError("Normalization factors not set. Call compute_normalize_factors_arrays() first.")
 
         processed_dlo_data = []
-        nans_counter = 0
+        nans_counter = 0 
         for dlo, cs0, csR in zip(self.dlo_data, self.cs0_list, self.csR_list):
             dlo_n = self.normalize(dlo, cs0, csR)
             if self._is_nan(dlo_n):
