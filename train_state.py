@@ -98,7 +98,7 @@ class DiffusionTrainer:
             obs_dlo_dim=self.OBS_DLO_DIM,
             obs_target_dim=self.OBS_TARGET_DIM,
         )
-        self.stats = self.dataset.stats
+        # self.stats = self.dataset.stats
 
         print(f"LENGTH OF DATASET: {len(self.dataset)}")
 
@@ -174,7 +174,7 @@ class DiffusionTrainer:
             "action_horizon": self.ACTION_HORIZON,
             "pred_horizon": self.PRED_HORIZON,
             "noise_scheduler_config": self.noise_scheduler.config,
-            "dataset_stats": self.stats,
+            # "dataset_stats": self.stats,
         }
         
         checkpoint_path = os.path.join(self.checkpoint_dir, f"chkp_{self.run.name}_epoch_{epoch}.pt")
@@ -258,7 +258,7 @@ class DiffusionTrainer:
                 "action_horizon": self.ACTION_HORIZON,
                 "pred_horizon": self.PRED_HORIZON,
                 "noise_scheduler_config": self.noise_scheduler.config,
-                "dataset_stats": self.stats,
+                # "dataset_stats": self.stats,
             },
             self.MODEL_SAVE_PATH
         )
@@ -272,8 +272,8 @@ class DiffusionTrainer:
         self.noise_pred_net.train()
 
         # Move data to device
-        obs = batch["obs"].to(self.DEVICE)  # shape: (B, OBS_HORIZON, OBS_DIM) + possibly future
-        actions = batch["action"].to(self.DEVICE)  # shape: (B, ACTION_HORIZON, ACTION_DIM)
+        obs = batch["obs"].to(self.DEVICE).float()  # shape: (B, OBS_HORIZON, OBS_DIM) + possibly future
+        actions = batch["action"].to(self.DEVICE).float()  # shape: (B, ACTION_HORIZON, ACTION_DIM)
         batch_size = obs.shape[0]
 
         # Flatten observation for FiLM conditioning
@@ -292,6 +292,10 @@ class DiffusionTrainer:
         noisy_actions = self.noise_scheduler.add_noise(actions, noise, timesteps)
 
         # Predict noise
+
+
+        noisy_actions = noisy_actions
+        obs_cond = obs_cond
         noise_pred = self.noise_pred_net(noisy_actions, timesteps, global_cond=obs_cond)
 
         # Compute L2 loss
