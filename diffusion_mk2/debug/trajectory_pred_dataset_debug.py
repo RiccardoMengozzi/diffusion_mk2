@@ -202,9 +202,9 @@ def main():
     action_dn = []
     for i, (ee_n, dlo_n, action_n) in enumerate(zip(ee_norm, dlo_norm, action_norm)):
         # REMEMBER descale=False here as I already did it above
-        ee_dn.append(ee_states_processor.denormalize(ee_n, descale=False, idx=i))
-        dlo_dn.append(dlo_processor.denormalize(dlo_n, idx=i))
-        action_dn.append(actions_processor.denormalize(action_n, descale=False, idx=i))
+        ee_dn.append(ee_states_processor.denormalize_sample(ee_n, descale=False, idx=i))
+        dlo_dn.append(dlo_processor.denormalize_sample(dlo_n, idx=i))
+        action_dn.append(actions_processor.denormalize_sample(action_n, descale=False, idx=i))
     dlo_dn = np.array(dlo_dn)
     ee_dn = np.array(ee_dn)
     action_dn = np.array(action_dn)

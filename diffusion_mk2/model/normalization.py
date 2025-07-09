@@ -193,7 +193,7 @@ class EEStateDataProcessor():
         return np.concatenate([pos_n, [theta_n], [gripper_state]])  # Keep gripper state unchanged
 
         
-    def denormalize(self, ee_state_n, descale, cs0=None, csR=None, idx=None):
+    def denormalize_sample(self, ee_state_n, descale, cs0=None, csR=None, idx=None):
         """
         If you give cs0 and csR, they will be used for denormalization.
         otherwise u can give the idx, that will be used to get the cs0 and csR from the lists.
@@ -429,7 +429,7 @@ class DloDataProcessor():
         dlo_n = (csR @ (dlo - cs0).T).T
         return dlo_n
             
-    def denormalize(self, dlo, cs0=None, csR=None, idx=None):
+    def denormalize_sample(self, dlo, cs0=None, csR=None, idx=None):
         """
         If you give cs0 and csR, they will be used for denormalization.
         otherwise u can give the idx, that will be used to get the cs0 and csR from the lists.
