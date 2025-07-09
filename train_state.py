@@ -27,15 +27,15 @@ hyperparameters = {
     "action_horizon": 8,
     "pred_horizon": 16,
     "num_diffusion_iters": 100,
-    "num_epochs": 1000,
-    "batch_size": 8192,
+    "num_epochs": 100,
+    "batch_size": 256,
     "lr": 1e-4,
     "weight_decay": 1e-6,
     "warmup_steps": 500,
     "ema_power": 0.75,
     "device": torch.device("cuda"),  # Will default to CUDA if available
     "model_save_path": "",
-    "checkpoint_save_interval": 100,  # Save checkpoint every N epochs
+    "checkpoint_save_interval": 10,  # Save checkpoint every N epochs
     "dataset_path": os.path.join(PROJECT_DIR, "zarr_data", "dataset_fixed.zarr.zip"),
 
     # wandb
@@ -47,6 +47,7 @@ class DiffusionTrainer:
     def __init__(
         self,
         config: dict,
+        checkpoint_path: str = None
     ):
         self.OBS_EE_DIM = config.get("obs_ee_dim", 5)
         self.OBS_DLO_DIM = config.get("obs_dlo_dim", 45)
@@ -67,26 +68,10 @@ class DiffusionTrainer:
 
         self.DEVICE = config.get("device", torch.device("cuda" if torch.cuda.is_available() else "cpu"))
         self.DATASET_PATH = config.get("dataset_path", "zarr_data/dummy.zarr.zip")
-        
-        #wandb
-        self.project_name = config.get("project_name", "diffusion_model")
-        self.entity = config.get("entity", "riccardo_mengozzi")
 
-        # Initialize wandb
-        self.run = wandb.init(
-            config=config,
-            project=self.project_name,
-            entity=self.entity,
-            mode="disabled"
-        )
-        if config.get("model_save_path") == "":
-            # Default model save path if not specified
-            config["model_save_path"] = f"weights/{self.run.name}_model.pt"
-        self.MODEL_SAVE_PATH = os.path.join(PROJECT_DIR, config.get("model_save_path"))
-        
-        # Create checkpoint directory
-        self.checkpoint_dir = os.path.join(PROJECT_DIR, f"checkpoints/{self.run.name}")
-        os.makedirs(self.checkpoint_dir, exist_ok=True)
+        self.CHECKPOINT_PATH = checkpoint_path
+        self.start_epoch = None
+
 
         # Build dataset and dataloader
         self.dataset = PushTStateDataset(
@@ -110,6 +95,7 @@ class DiffusionTrainer:
             pin_memory=True,
             persistent_workers=True
         )
+
 
         # Build diffusion components
         self.noise_scheduler = DDPMScheduler(
@@ -142,10 +128,38 @@ class DiffusionTrainer:
             optimizer=self.optimizer,
             num_warmup_steps=self.WARMUP_STEPS,
             num_training_steps=total_training_steps
-        )
+            )
 
-        # Tracking
-        self.global_step = 0
+
+
+        #wandb
+        self.project_name = config.get("project_name", "diffusion_model")
+        self.entity = config.get("entity", "riccardo_mengozzi")
+
+        # Initialize wandb
+        wandb_kwargs = {
+            "config": config,
+            "project": config.get("project_name"),
+            "entity": config.get("entity"),
+        }
+
+
+        if self.CHECKPOINT_PATH is not None and os.path.isfile(self.CHECKPOINT_PATH):
+            self.start_epoch = self.load_checkpoint(self.CHECKPOINT_PATH) + 1
+            wandb_kwargs.update({"id": self.run_id, "resume": "must"})
+        else:
+            # Tracking
+            self.global_step = 0
+
+
+
+        self.run = wandb.init(**wandb_kwargs)
+        self.MODEL_SAVE_PATH = os.path.join(PROJECT_DIR, config.get("model_save_path"))
+        # Create checkpoint directory
+        self.checkpoint_dir = os.path.join(PROJECT_DIR, f"checkpoints/{self.run.name}")
+        os.makedirs(self.checkpoint_dir, exist_ok=True)
+
+
 
 
     def save_checkpoint(self, epoch: int, avg_loss: float):
@@ -174,6 +188,7 @@ class DiffusionTrainer:
             "action_horizon": self.ACTION_HORIZON,
             "pred_horizon": self.PRED_HORIZON,
             "noise_scheduler_config": self.noise_scheduler.config,
+            "wandb_run_id": self.run.id,
             # "dataset_stats": self.stats,
         }
         
@@ -195,13 +210,14 @@ class DiffusionTrainer:
         self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         self.lr_scheduler.load_state_dict(checkpoint["lr_scheduler_state_dict"])
         self.global_step = checkpoint["global_step"]
+        self.run_id = checkpoint.get("wandb_run_id", None)
         
         print(f"Checkpoint loaded from {checkpoint_path}")
         print(f"Resuming from epoch {checkpoint['epoch']}, global step {self.global_step}")
         
         return checkpoint["epoch"]
 
-    def train(self, checkpoint_path: str = None):
+    def train(self):
         """
         Run the training loop for NUM_EPOCHS. After training completes,
         the EMA‐weighted model is copied and saved to `self.model_save_path`.
@@ -209,11 +225,10 @@ class DiffusionTrainer:
         Args:
             resume_from_checkpoint: Path to checkpoint file to resume from
         """
-        start_epoch = 0
-        if checkpoint_path and os.path.exists(checkpoint_path):
-            start_epoch = self.load_checkpoint(checkpoint_path) + 1
+        if self.start_epoch is None:
+            self.start_epoch = 0 
         
-        with tqdm(range(start_epoch, self.NUM_EPOCHS), desc="Epoch") as epoch_bar:
+        with tqdm(range(self.start_epoch, self.NUM_EPOCHS), desc="Epoch") as epoch_bar:
             for epoch_idx in epoch_bar:
                 epoch_losses = []
                 with tqdm(self.dataloader, desc="Batch", leave=False) as batch_bar:
@@ -258,6 +273,7 @@ class DiffusionTrainer:
                 "action_horizon": self.ACTION_HORIZON,
                 "pred_horizon": self.PRED_HORIZON,
                 "noise_scheduler_config": self.noise_scheduler.config,
+                "wandb_run_id": self.run.id,
                 # "dataset_stats": self.stats,
             },
             self.MODEL_SAVE_PATH
@@ -292,10 +308,6 @@ class DiffusionTrainer:
         noisy_actions = self.noise_scheduler.add_noise(actions, noise, timesteps)
 
         # Predict noise
-
-
-        noisy_actions = noisy_actions
-        obs_cond = obs_cond
         noise_pred = self.noise_pred_net(noisy_actions, timesteps, global_cond=obs_cond)
 
         # Compute L2 loss
@@ -319,9 +331,9 @@ if __name__ == "__main__":
                         help="Name of the checkpoint to resume from. If not provided, training starts from scratch.")
     args = parser.parse_args()
     # Example usage; replace dataset_url_id with your actual Google Drive ID (without extra query params)
-    trainer = DiffusionTrainer(config=hyperparameters)
+    trainer = DiffusionTrainer(config=hyperparameters, checkpoint_path=args.chkp_path)
     
     # To resume from a checkpoint, uncomment and provide the path:
     # trainer.train(resume_from_checkpoint="checkpoints/your_run_name/checkpoint_epoch_10.pt")
     
-    trainer.train(checkpoint_path=args.chkp_path)
+    trainer.train()
