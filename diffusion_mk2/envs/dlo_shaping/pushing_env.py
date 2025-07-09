@@ -11,7 +11,7 @@ from scipy.spatial.transform import Rotation as R
 import time
 from tqdm import tqdm
 import diffusion_mk2.utils.dlo_computations as dlo_utils
-from diffusion_mk2.inference.inference_state import InferenceState
+from diffusion_mk2.inference.shaping_inference import InferenceState
 
 np.set_printoptions(
     precision=4,  # number of digits after the decimal

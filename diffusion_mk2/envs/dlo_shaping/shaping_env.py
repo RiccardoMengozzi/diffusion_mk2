@@ -14,13 +14,13 @@ import diffusion_mk2.utils.gs_utils as gs_utils
 from diffusion_mk2.utils.utils import load_yaml
 from scipy.spatial.transform import Rotation as R
 from diffusion_mk2.utils.dlo_shapes import U_SHAPE, S_SHAPE
-from diffusion_mk2.inference.inference_state import InferenceState
+from diffusion_mk2.inference.shaping_inference import ShapingInference
 
 
 SHAPES = [U_SHAPE, S_SHAPE]
 PROJECT_FOLDER = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-class GripperEnv():
+class ShapingEnv():
     def __init__(self, args):
         
         cfg = load_yaml(os.path.join(PROJECT_FOLDER, args.cfg))
@@ -68,7 +68,6 @@ class GripperEnv():
         # franka
         self.franka_position = cfg["entities"]["franka"].get("position")
         self.franka_orientation = cfg["entities"]["franka"].get("orientation")
-        print("franka orientation: ", self.franka_orientation)
         self.franka_gravity_compensation = cfg["entities"]["franka"].get("gravity_compensation")
         self.ee_friction = cfg["entities"]["franka"]["end_effector"].get("friction")
         self.ee_needs_coup = cfg["entities"]["franka"]["end_effector"].get("needs_coup")
@@ -192,7 +191,12 @@ class GripperEnv():
         self.target = random.choice(SHAPES)
 
         #### Initialize model and observation deque ####
-        self.model = InferenceState(self.model_path, device=gs.device)
+        self.model = ShapingInference(self.model_path, device=gs.device)
+        model_for_stats = torch.load("/home/mengo/Research/LLM_DOM/diffusion_mk2/weights/chkp_dummy-529qk1bd_epoch_30.pt",
+                                          map_location=gs.device,
+                                          weights_only=False)
+        self.dataset_stats = model_for_stats["dataset_stats"]
+
         obs_horizon = self.model.obs_horizon
         
         # Initialize observation buffer
@@ -255,13 +259,12 @@ class GripperEnv():
                                             downsample_number=self.dlo_number_of_particles,
                                             average_number=self.dlo_number_of_particles_smoothing)
         obs_target = self.target
-
         obs_ee = np.array(obs_ee).flatten()
         obs_dlo = np.array(obs_dlo).flatten()
         obs_target = np.array(obs_target).flatten()
-        obs = np.concatenate(
-                [obs_ee, obs_dlo, obs_target], axis=-1
-                )
+
+
+        obs = np.concatenate([obs_ee, obs_dlo, obs_target])
 
 
         return obs
@@ -332,9 +335,6 @@ class GripperEnv():
             
             target_gripper = a[4]
 
-
-            print(f"quat =  {target_quat}, theta = {a[3]}")
-
             qpos = self.franka.inverse_kinematics(
                 link=self.end_effector,
                 pos=target_pos,
@@ -380,6 +380,7 @@ class GripperEnv():
 
                 pred_action, pred_actions = self.model.run_inference(
                     observation=obs,
+                    stats=self.dataset_stats,
                 )
                 # Visualize denoising
                 # for a in pred_actions:
@@ -387,7 +388,9 @@ class GripperEnv():
                 #     self.draw_action(a)  # Fixed method call
 
                 # Loop through each waypoint in the predicted action
-                gs_utils.draw_action_trajectory(self.scene, pred_action, self.ee_z_offset, radius=0.001)
+                print("pred_action:",pred_action)
+                gs_utils.draw_action_trajectory(self.scene, pred_action, self.ee_z_offset, radius=0.1)
+                time.sleep(2)
 
                 self.do_action(pred_action)
                 
@@ -409,5 +412,5 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
 
-    gripper_env = GripperEnv(args=args)
+    gripper_env = ShapingEnv(args=args)
     gripper_env.run()

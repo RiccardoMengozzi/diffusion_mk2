@@ -1,5 +1,5 @@
 inference:
-  model_path: weights/chkp_vague-mountain-29_epoch_1000.pt
+  model_path: weights/chkp_dummy-529qk1bd_epoch_30.pt
   number_of_episodes: 10
   number_of_actions: 10
 

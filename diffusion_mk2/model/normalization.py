@@ -1,16 +1,25 @@
 import numpy as np
+import torch
 
 
 class ActionDataProcessor():
-    def __init__(self, action_data, num_points, is_first_idx, is_last_gripper):
+    def __init__(self, is_first_idx, is_last_gripper, action_data=None):
         self.action_data = action_data
-        self.num_points = num_points
         self.cs0_list = None
         self.csR_list = None
         self.scale_min = None
         self.scale_max = None
         self.is_first_idx = is_first_idx  # Whether the first component is an index
         self.is_last_gripper = is_last_gripper  # Whether the last component is the
+
+    def set_action_data(self, action_data):
+        """Set the action data for processing."""
+        self.action_data = action_data
+
+    def set_scale_min_max(self, min, max):
+        """Set the scaling range for normalization."""
+        self.scale_min = min
+        self.scale_max = max
 
     def set_normalize_factors_arrays(self, cs0_list, csR_list):
         self.cs0_list = cs0_list
@@ -47,8 +56,17 @@ class ActionDataProcessor():
         else:
             return np.concatenate([pos_n, [theta_n]])
 
-        
-    def denormalize(self, action_n, descale, csR=None, idx=None):
+
+    def denormalize(self, action_n, descale, csR=None, idx=None, min=None, max=None):
+        denormalized_data = []
+        for action in action_n:
+            denormalized_action = self.denormalize_sample(
+                action, descale, csR=csR, idx=idx, min=min, max=max
+            )
+            denormalized_data.append(denormalized_action)
+        return np.array(denormalized_data)
+
+    def denormalize_sample(self, action_n, descale, csR=None, idx=None, min=None, max=None):
         """
         If you give cs0 and csR, they will be used for denormalization.
         otherwise u can give the idx, that will be used to get the cs0 and csR from the lists.
@@ -61,9 +79,12 @@ class ActionDataProcessor():
             csR = self.csR_list[idx]
 
         if descale:
-            if self.scale_min is None or self.scale_max is None:
-                raise ValueError("scaling range not set!!!")
-            action_n = self.descale(action_n, self.scale_min, self.scale_max)
+            if min is not None and max is not None:
+                if self.scale_min is None or self.scale_max is None:
+                    raise ValueError("scaling range not set or passed!!!")
+                else:
+                    min, max = self.scale_min, self.scale_max
+            action_n = self.descale(action_n, min, max)
 
         pos_start_idx, pos_last_idx = 0, -1
         if self.is_first_idx:
@@ -140,26 +161,28 @@ class ActionDataProcessor():
         return np.array(scaled_processed_action_data)
 
 class EEStateDataProcessor():
-    def __init__(self, ee_state_data):
+    def __init__(self, ee_state_data=None):
         self.ee_state_data = ee_state_data
         self.cs0_list = None
         self.csR_list = None
         self.scale_min = None
         self.scale_max = None
 
- 
+    def set_ee_state_data(self, ee_state_data):
+        """Set the end-effector state data for processing."""
+        self.ee_state_data = ee_state_data
 
     def set_normalize_factors_arrays(self, cs0_list, csR_list):
         self.cs0_list = cs0_list
         self.csR_list = csR_list
 
     def normalize(self, ee_state, cs0, csR):
+    
         # Extract components - works for both 2D and 3D
         pos = ee_state[0:-2]  # All spatial components (x, y) or (x, y, z) and theta
         theta = ee_state[-2]  # second last component is always rotation, last component is gripper state
         gripper_state = ee_state[-1]  # Last component is gripper state (open/close)
 
-    
         pos_centered = pos - cs0     # subtract the mean/centroid
         pos_n = (csR @ pos_centered.T).T  
         pos_n = pos_n.flatten()  # Ensure it's a flat array
@@ -225,12 +248,25 @@ class EEStateDataProcessor():
         ee_state = ee_state * (max - min) + min
         return ee_state
 
-    def preprocess(self):
-        if self.cs0_list is None or self.csR_list is None:
-            raise ValueError("Normalization factors not set. Call set_normalize_factors_arrays() first.")
+    def preprocess(self, data=None, cs0_list=None, csR_list=None, min=None, max=None):
+        if isinstance(data, torch.Tensor):
+            data = data.cpu().numpy()
+
+        if cs0_list is None or csR_list is None:
+            if self.cs0_list is None or self.csR_list is None:
+                raise ValueError("Normalization factors not set. Call set_normalize_factors_arrays() first.")
+            else:
+                cs0_list, csR_list = self.cs0_list, self.csR_list
+
+        if data is None:
+            if self.ee_state_data is None:
+                raise ValueError("End-effector state data not set. Call set_ee_state_data() first.")
+            else:
+                data = self.ee_state_data
+
 
         processed_ee_state_data = []
-        for ee_state, cs0, csR in zip(self.ee_state_data, self.cs0_list, self.csR_list):
+        for ee_state, cs0, csR in zip(data, cs0_list, csR_list):
             ee_state_n = self.normalize(ee_state, cs0, csR)  # Note: removed cs0 parameter as it wasn't used
             processed_ee_state_data.append(ee_state_n)
 
@@ -238,23 +274,41 @@ class EEStateDataProcessor():
         self.scale_min = np.min(processed_ee_state_data, axis=0)
         self.scale_max = np.max(processed_ee_state_data, axis=0)
 
+        if min is None or max is None:
+            if self.scale_min is None or self.scale_max is None:
+                raise ValueError("Scaling range not set. Call set_scale_min_max() first.")
+            else:
+                min, max = self.scale_min, self.scale_max
 
         scaled_processed_ee_state_data = []
         for ee_state in processed_ee_state_data:
-            ee_state = self.scale(ee_state, self.scale_min, self.scale_max)
+            ee_state = self.scale(ee_state, min, max)
             scaled_processed_ee_state_data.append(ee_state)
 
         return np.array(scaled_processed_ee_state_data)
     
+    def preprocess_sample(self, ee_state, cs0, csR, min, max):
+        """Preprocess a single sample of end-effector state."""
+        ee_state_n = self.normalize(ee_state, cs0, csR)
+        ee_state_n = self.scale(ee_state_n, min, max)
+        return ee_state_n
+    
     
 
 class DloDataProcessor():
-    def __init__(self, dlo_data):
+    def __init__(self, dlo_data=None):
         self.dlo_data = dlo_data 
         self.cs0_list = None
         self.csR_list = None
 
-    def _compute_normalize_factors(self, dlo):
+    def set_dlo_data(self, dlo_data):
+        """Set the DLO data for processing."""
+        self.dlo_data = dlo_data
+
+    def compute_normalize_factors(self, dlo):
+        if isinstance(dlo, torch.Tensor):
+            dlo = dlo.cpu().numpy()
+
         cs0 = np.mean(dlo, axis=0, keepdims=True)
         dlo_centered = dlo - cs0
         
@@ -332,11 +386,13 @@ class DloDataProcessor():
         
         return csR
     
-    def compute_normalize_factors_arrays(self):
+    def compute_normalize_factors_arrays(self, data=None):
         cs0_list = []
         csR_list = []
-        for dlo in self.dlo_data:
-            cs0, csR = self._compute_normalize_factors(dlo)
+        if data is None:
+            data = self.dlo_data
+        for dlo in data:
+            cs0, csR = self.compute_normalize_factors(dlo)
             cs0_list.append(cs0)
             csR_list.append(csR)
         cs0_arr = np.vstack(cs0_list)
@@ -367,9 +423,6 @@ class DloDataProcessor():
             return self.cs0_list, self.csR_list
         else:
             raise ValueError("Normalization factors not set. Call compute_normalize_factors_arrays() first.")
-
-    def _is_nan(self, dlo):
-        return np.isnan(dlo).any() or np.isinf(dlo).any()
     
     def normalize(self, dlo, cs0, csR):
         # Matrix operations work for any number of dimensions
@@ -394,17 +447,30 @@ class DloDataProcessor():
         dlo_dn = (csR.T @ dlo.T).T + cs0
         return dlo_dn
 
-    def preprocess(self):
-        if self.cs0_list is None or self.csR_list is None:
-            raise ValueError("Normalization factors not set. Call compute_normalize_factors_arrays() first.")
+    def preprocess(self, data=None, cs0_list=None, csR_list=None):
+        if isinstance(data, torch.Tensor):
+            data = data.cpu().numpy()
+
+        if cs0_list is None or csR_list is None:
+            if self.cs0_list is not None and self.csR_list is not None:
+                cs0_list, csR_list = self.cs0_list, self.csR_list
+            else:
+                raise ValueError("Normalization factors not set. Call compute_normalize_factors_arrays() first or pass them as arguments.")
+            
+        if data is None:
+            if self.dlo_data is None:
+                raise ValueError("DLO data not set. Call set_dlo_data() first or pass it as argument.")
+            else:
+                data = self.dlo_data
 
         processed_dlo_data = []
-        nans_counter = 0 
-        for dlo, cs0, csR in zip(self.dlo_data, self.cs0_list, self.csR_list):
+        for dlo, cs0, csR in zip(data, cs0_list, csR_list):
             dlo_n = self.normalize(dlo, cs0, csR)
-            if self._is_nan(dlo_n):
-                nans_counter += 1
-                continue
             processed_dlo_data.append(dlo_n)
         
-        return np.array(processed_dlo_data), nans_counter
+        return np.array(processed_dlo_data)
+    
+    def preprocess_sample(self, dlo, cs0, csR):
+        """Preprocess a single sample of DLO."""
+        dlo_n = self.normalize(dlo, cs0, csR)
+        return dlo_n
