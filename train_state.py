@@ -27,21 +27,21 @@ hyperparameters = {
     "action_horizon": 8,
     "pred_horizon": 16,
     "num_diffusion_iters": 100,
-    "num_epochs": 100,
-    "batch_size": 256,
+    "num_epochs": 10000,
+    "batch_size": 7000,
     "lr": 1e-4,
     "weight_decay": 1e-6,
     "warmup_steps": 500,
     "ema_power": 0.75,
     "device": torch.device("cuda"),  # Will default to CUDA if available
     "model_save_path": "",
-    "checkpoint_save_interval": 10,  # Save checkpoint every N epochs
-    "dataset_path": os.path.join(PROJECT_DIR, "zarr_data", "dataset_fixed.zarr.zip"),
+    "checkpoint_save_interval": 200,  # Save checkpoint every N epochs
+    "dataset_path": os.path.join(PROJECT_DIR, "zarr_data", "dataset.zarr.zip"),
 
     # wandb
     "project_name": "diffusion_model",
     "entity": "riccardo_mengozzi",
-    "wandb_mode": "disabled",  # Change to "online" to enable logging
+    "wandb_mode": "online",  # Change to "online" to enable logging
 }
 
 class DiffusionTrainer:
