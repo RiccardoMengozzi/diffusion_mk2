@@ -14,7 +14,7 @@ from diffusers import get_scheduler
 from diffusers.schedulers import DDPMScheduler
 
 from diffusion_mk2.model.diffusion.conditional_unet_1d import ConditionalUnet1D
-from diffusion_mk2.dataset.pusht_state_dataset import PushTStateDataset
+from diffusion_mk2.dataset.shaping_dataset import PushTStateDataset
 
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 

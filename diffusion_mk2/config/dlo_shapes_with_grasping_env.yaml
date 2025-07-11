@@ -1,5 +1,5 @@
 inference:
-  model_path: weights/chkp_dummy-529qk1bd_epoch_30.pt
+  model_path: weights/chkp_deep-bird-38_epoch_2200.pt
   number_of_episodes: 10
   number_of_actions: 10
 

@@ -14,12 +14,15 @@
 import numpy as np
 import zarr
 import torch
-from diffusion_mk2.model.normalization import (
-    DloDataProcessor,
-    ActionDataProcessor,
-    EEStateDataProcessor,
+from diffusion_mk2.model.normalization_simple import (
+    get_data_stats,
+    normalize_data,
 )
 
+np.set_printoptions(precision=4,    # number of decimal places
+                    suppress=True,  # suppress scientific notation
+                    linewidth=100,  # characters per line
+                    threshold=1000) # controls summarization of large arrays
 
 def create_sample_indices(
     episode_ends: np.ndarray,
@@ -97,11 +100,9 @@ def sample_sequence(
     return result
 
 
-# normalize data
-
 
 # dataset
-class PushTStateDataset(torch.utils.data.Dataset):
+class ShapingDataset(torch.utils.data.Dataset):
     def __init__(
         self,
         dataset_path,
@@ -140,13 +141,6 @@ class PushTStateDataset(torch.utils.data.Dataset):
             pad_after=action_horizon - 1,
         )
 
-        # compute statistics and normalized data to [-1,1]
-        # stats = dict()
-        # normalized_train_data = dict()
-        # for key, data in train_data.items():
-        #     stats[key] = get_data_stats(data)
-        #     normalized_train_data[key] = normalize_data(data, stats[key])
-
         self.initial_shapes_processor = None
         self.final_shapes_processor = None
         self.ee_states_processor = None
@@ -157,86 +151,107 @@ class PushTStateDataset(torch.utils.data.Dataset):
         self.action_horizon = action_horizon
         self.obs_horizon = obs_horizon
 
-        print("start data normalization...")
-        self.normalized_train_data = self.normalize_data(train_data)
-
-        norm_train_data_divided = {
-            "ee_state": self.normalized_train_data["obs"][:, : self.obs_ee_dim],
-            "initial_shape": self.normalized_train_data["obs"][
-                :, self.obs_ee_dim : self.obs_ee_dim + self.obs_dlo_dim
-            ],
-            "final_shape": self.normalized_train_data["obs"][
-                :,
-                self.obs_ee_dim
-                + self.obs_dlo_dim : self.obs_ee_dim
-                + self.obs_dlo_dim
-                + self.obs_target_dim,
-            ],
-            "action": self.normalized_train_data["action"],
+        # Divide the observation data into components
+        train_data_divided = {
+            "obs_ee": train_data["obs"][:, :obs_ee_dim],  # (N, obs_ee_dim)
+            "obs_dlo": train_data["obs"][:, obs_ee_dim:obs_ee_dim + obs_dlo_dim].reshape(-1, obs_dlo_dim // 3, 3),  # (N, obs_dlo_dim // 3, 3)
+            "obs_target": train_data["obs"][:, obs_ee_dim + obs_dlo_dim:obs_ee_dim + obs_dlo_dim + obs_target_dim].reshape(-1, obs_target_dim // 3, 3),  # (N, obs_target_dim // 3, 3)
+            "action": train_data["action"],  # (N, action_dim)
         }
 
+        # Get unified spatial statistics for all x,y,z coordinates
+        ee_spatial = train_data_divided["obs_ee"][:, :3]  # x, y, z from EE
+        dlo_spatial = train_data_divided["obs_dlo"].reshape(-1, 3)  # All DLO points
+        target_spatial = train_data_divided["obs_target"].reshape(-1, 3)  # All target points
+        
+        # Combine all spatial coordinates to get unified statistics
+        all_spatial_coords = np.concatenate([
+            ee_spatial,
+            dlo_spatial,
+            target_spatial
+        ], axis=0)
+        
+        # Get unified spatial statistics
+        unified_spatial_stats = get_data_stats(all_spatial_coords)
+        
+        # Calculate statistics for each component
         stats = dict()
-        for key, data in norm_train_data_divided.items():
-            stats[key] = self.get_data_stats(data)
+        
+        # EE stats: split into spatial and non-spatial components
+        ee_theta = train_data_divided["obs_ee"][:, 3:4]   # theta
+        ee_gripper = train_data_divided["obs_ee"][:, 4:5] # gripper
+        
+        stats["obs_ee_spatial"] = unified_spatial_stats
+        stats["obs_ee_theta"] = get_data_stats(ee_theta)
+        stats["obs_ee_gripper"] = get_data_stats(ee_gripper)
+        
+        # DLO and target use unified spatial stats
+        stats["obs_dlo"] = unified_spatial_stats
+        stats["obs_target"] = unified_spatial_stats
+        
+        # Action stats
+        stats["action"] = get_data_stats(train_data_divided["action"])
+
+        # Apply normalization with unified spatial stats
+        normalized_train_data = dict()
+        
+        # Normalize EE components separately
+        ee_spatial_norm = normalize_data(ee_spatial, stats["obs_ee_spatial"], keep_zero_centered=False)
+        ee_theta_norm = normalize_data(ee_theta, stats["obs_ee_theta"], keep_zero_centered=False)
+        ee_gripper_norm = normalize_data(ee_gripper, stats["obs_ee_gripper"], keep_zero_centered=False)
+        
+        # Combine normalized EE components
+        normalized_train_data["obs_ee"] = np.concatenate([
+            ee_spatial_norm, 
+            ee_theta_norm, 
+            ee_gripper_norm
+        ], axis=1)
+        
+        # Normalize DLO and target with unified spatial stats
+        dlo_reshaped = train_data_divided["obs_dlo"].reshape(-1, 3)
+        target_reshaped = train_data_divided["obs_target"].reshape(-1, 3)
+        
+        dlo_normalized = normalize_data(dlo_reshaped, stats["obs_dlo"], keep_zero_centered=False)
+        target_normalized = normalize_data(target_reshaped, stats["obs_target"], keep_zero_centered=False)
+        
+        # Reshape back to original structure
+        normalized_train_data["obs_dlo"] = dlo_normalized.reshape(-1, obs_dlo_dim // 3, 3)
+        normalized_train_data["obs_target"] = target_normalized.reshape(-1, obs_target_dim // 3, 3)
+        
+        # Normalize actions
+        normalized_train_data["action"] = normalize_data(train_data_divided["action"], stats["action"], keep_zero_centered=True)
+
+        # Debug prints
+        print("Original EE[0] (first 3 spatial):", train_data_divided["obs_ee"][0, :3])
+        print("Normalized EE[0] (first 3 spatial):", normalized_train_data["obs_ee"][0, :3])
+        print("Original DLO[0] first point:", train_data_divided["obs_dlo"][0, 0])
+        print("Normalized DLO[0] first point:", normalized_train_data["obs_dlo"][0, 0])
+
+        # Concatenate normalized observations back together
+        # Flatten the 3D components when concatenating
+        norm_obs = np.concatenate(
+            [
+                normalized_train_data["obs_ee"],  # Use normalized EE
+                normalized_train_data["obs_dlo"].reshape(-1, obs_dlo_dim),  # Flatten normalized DLO
+                normalized_train_data["obs_target"].reshape(-1, obs_target_dim),  # Flatten normalized Target
+            ],
+            axis=1,
+        )
+        
+        # Create the final normalized dataset
+        normalized_concat_train_data = {
+            "obs": norm_obs, 
+            "action": normalized_train_data["action"], 
+        }
+        
+        self.normalized_train_data = normalized_concat_train_data
         self.stats = stats
 
-    def get_data_stats(self, data):
-        data = data.reshape(-1, data.shape[-1])
-        stats = {"min": np.min(data, axis=0), "max": np.max(data, axis=0)}
-        return stats
-
-    def normalize_data(self, data):
-        actions = data["action"]
-        states = data["obs"]
-
-        initial_shape_range = [self.obs_ee_dim, self.obs_ee_dim + self.obs_dlo_dim]
-        final_shape_range = [
-            initial_shape_range[0] + self.obs_dlo_dim,
-            initial_shape_range[1] + self.obs_target_dim,
-        ]
-        ee_states = states[:, : self.obs_ee_dim]
-        initial_shapes = states[
-            :, initial_shape_range[0] : initial_shape_range[1]
-        ].reshape(-1, self.obs_dlo_dim // 3, 3)
-        final_shapes = states[:, final_shape_range[0] : final_shape_range[1]].reshape(
-            -1, self.obs_target_dim // 3, 3
-        )
-
-        self.initial_shapes_processor = DloDataProcessor(initial_shapes)
-        self.final_shapes_processor = DloDataProcessor(final_shapes)
-        self.ee_states_processor = EEStateDataProcessor(ee_states)
-        self.actions_processor = ActionDataProcessor(
-            action_data=actions, is_first_idx=False, is_last_gripper=True
-        )
-
-        norm_factors = self.initial_shapes_processor.compute_normalize_factors_arrays()
-
-        self.initial_shapes_processor.set_normalize_factors_arrays(*norm_factors)
-        self.final_shapes_processor.set_normalize_factors_arrays(*norm_factors)
-        self.ee_states_processor.set_normalize_factors_arrays(*norm_factors)
-        self.actions_processor.set_normalize_factors_arrays(*norm_factors)
-
-        print("normalizing_init_shapes")
-        initial_shapes_n = self.initial_shapes_processor.preprocess()
-        print("normalizing target shapes")
-        final_shapes_n = self.final_shapes_processor.preprocess()
-        print("normalizing ee_states")
-        ee_states_n = self.ee_states_processor.preprocess()
-        print("normalizing actions")
-        actions_n = self.actions_processor.preprocess()
-
-        initial_shapes_n = initial_shapes_n.reshape(-1, self.obs_dlo_dim)
-        final_shapes_n = final_shapes_n.reshape(-1, self.obs_target_dim)
-        ee_states_n = ee_states_n.reshape(-1, self.obs_ee_dim)
-
-        states_n = np.concatenate(
-            [ee_states_n, initial_shapes_n, final_shapes_n], axis=1
-        )
-
-        return {
-            "action": actions_n,
-            "obs": states_n,
-        }
+        # Print dataset statistics
+        print("Unified spatial stats: min={}, max={}".format(unified_spatial_stats['min'], unified_spatial_stats['max']))
+        print("EE theta stats: min={}, max={}".format(stats["obs_ee_theta"]['min'], stats["obs_ee_theta"]['max']))
+        print("EE gripper stats: min={}, max={}".format(stats["obs_ee_gripper"]['min'], stats["obs_ee_gripper"]['max']))
+        print("Action stats: min={}, max={}".format(stats["action"]['min'], stats["action"]['max']))
 
     def __len__(self):
         # all possible segments of the dataset
@@ -265,8 +280,8 @@ class PushTStateDataset(torch.utils.data.Dataset):
 
 if __name__ == "__main__":
     # Example usage
-    dataset = PushTStateDataset(
-        dataset_path="/home/mengo/Research/LLM_DOM/diffusion_mk2/zarr_data/test.zarr.zip",
+    dataset = ShapingDataset(
+        dataset_path="/home/mengo/Research/LLM_DOM/diffusion_mk2/zarr_data/dataset_cleaned.zarr.zip",
         pred_horizon=16,
         obs_horizon=2,
         action_horizon=8,
@@ -277,10 +292,7 @@ if __name__ == "__main__":
 
     print("Dataset length:", len(dataset))
     sample = dataset[3]
-    print("episode ends:", dataset.episode_ends)
-    # print("Sample keys:", sample.keys())
-    # print("Sample obs shape:", sample['obs'].shape)
-    # print("Sample action shape:", sample['action'].shape)
-    # print("Stats:", dataset.stats)
-    # print("First 20 obs:", sample['obs'])
-    # print("First 20 actions:", sample['action'][:20])
+    print("Episode ends:", dataset.episode_ends)
+    print("Sample keys:", sample.keys())
+    print("Sample obs shape:", sample['obs'].shape)
+    print("Sample action shape:", sample['action'].shape)

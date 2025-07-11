@@ -79,7 +79,7 @@ class ActionDataProcessor():
             csR = self.csR_list[idx]
 
         if descale:
-            if min is not None and max is not None:
+            if min is None and max is None:
                 if self.scale_min is None or self.scale_max is None:
                     raise ValueError("scaling range not set or passed!!!")
                 else:
@@ -158,7 +158,7 @@ class ActionDataProcessor():
             action = self.scale(action, self.scale_min, self.scale_max)
             scaled_processed_action_data.append(action)
 
-        return np.array(scaled_processed_action_data)
+        return np.array(scaled_processed_action_data), np.array(processed_action_data)
 
 class EEStateDataProcessor():
     def __init__(self, ee_state_data=None):
@@ -285,7 +285,7 @@ class EEStateDataProcessor():
             ee_state = self.scale(ee_state, min, max)
             scaled_processed_ee_state_data.append(ee_state)
 
-        return np.array(scaled_processed_ee_state_data)
+        return np.array(scaled_processed_ee_state_data), np.array(processed_ee_state_data)
     
     def preprocess_sample(self, ee_state, cs0, csR, min, max):
         """Preprocess a single sample of end-effector state."""

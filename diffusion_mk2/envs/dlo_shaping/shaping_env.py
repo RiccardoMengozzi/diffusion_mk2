@@ -13,8 +13,16 @@ import diffusion_mk2.utils.dlo_computations as dlo_utils
 import diffusion_mk2.utils.gs_utils as gs_utils
 from diffusion_mk2.utils.utils import load_yaml
 from scipy.spatial.transform import Rotation as R
-from diffusion_mk2.utils.dlo_shapes import U_SHAPE, S_SHAPE
-from diffusion_mk2.inference.shaping_inference import ShapingInference
+from diffusion_mk2.utils.dlo_shapes import U_SHAPE, S_SHAPE, ONE_ACTION_SHAPE, ONE_ACTION_SHAPE2
+from diffusion_mk2.inference.shaping_inference_simple_norm import ShapingInferenceSimpleNorm
+
+
+
+np.set_printoptions(precision=4,    # number of decimal places
+                    suppress=True,  # suppress scientific notation
+                    linewidth=100,  # characters per line
+                    threshold=1000) # controls summarization of large arrays
+
 
 
 SHAPES = [U_SHAPE, S_SHAPE]
@@ -188,10 +196,10 @@ class ShapingEnv():
 
         self.initial_pose = np.array([0.45, 0.0, self.table_height + self.ee_z_offset + self.ee_z_lift, 
                                       0.0, 0.707, 0.707, 0.0])
-        self.target = random.choice(SHAPES)
-
+        # self.target = random.choice(SHAPES)
+        self.target = U_SHAPE  # For testing purposes, use a fixed shape
         #### Initialize model and observation deque ####
-        self.model = ShapingInference(self.model_path, device=gs.device)
+        self.model = ShapingInferenceSimpleNorm(self.model_path, device=gs.device)
         model_for_stats = torch.load("/home/mengo/Research/LLM_DOM/diffusion_mk2/weights/chkp_dummy-529qk1bd_epoch_30.pt",
                                           map_location=gs.device,
                                           weights_only=False)
@@ -220,7 +228,7 @@ class ShapingEnv():
         self.scene.clear_debug_objects()
 
         # Choose new target
-        self.target = random.choice(SHAPES)
+        self.target = ONE_ACTION_SHAPE2
         dlo_utils.draw_skeleton(self.target, self.scene, self.dlo_radius)
 
         # Place robot aboce centre of the rope
@@ -320,20 +328,34 @@ class ShapingEnv():
                 break
 
     def do_action(self, action):
-        for a in action:
-            target_pos = a[:3]
-
-            q_old = R.from_euler('xyz', [a[3], 0, 0]).as_quat()
-            # q_old ≈ [0.77541212, 0., 0., 0.63145549]
-
-            # 2) costruisci l’asse usando (x_old, w_old):
-            v = np.array([0.0, q_old[0], q_old[3]])      # [0, 0.7754, 0.6315]
-            u = v / np.linalg.norm(v)                    # asse unitario
-
-            # 3) crea il nuovo quaternion con angle = π rad
-            target_quat = R.from_rotvec(np.pi * u).as_quat()
+        for i, a in enumerate(action):
+            if len(action) > 1:
+                t = i / (len(action) - 1)
+            else:
+                t = 0.0
             
-            target_gripper = a[4]
+            # Red to blue gradient
+            color = [1.0 - t, 0.0, t, 1.0]
+
+            dx, dy, dz, dt, dg = a
+
+            current_pos = self.end_effector.get_pos().cpu().numpy()
+            current_quat = self.end_effector.get_quat().cpu().numpy()
+            current_gripper = self.franka.get_qpos().cpu().numpy()[-1]
+
+            current_R = (R.from_quat(current_quat)).as_matrix()
+            delta_R = R.from_euler("xyz", [dt, 0.0, 0.0]).as_matrix()
+            target_R = current_R @ delta_R
+
+            target_pos = current_pos + np.array([dx, dy, dz])
+            target_quat = (R.from_matrix(target_R)).as_quat()
+            target_gripper = current_gripper + dg
+
+            self.scene.draw_debug_sphere(
+                pos=np.array([target_pos[0], target_pos[1], target_pos[2] - self.ee_z_offset]),
+                radius=0.001,
+                color=color,
+            )
 
             qpos = self.franka.inverse_kinematics(
                 link=self.end_effector,
@@ -380,17 +402,18 @@ class ShapingEnv():
 
                 pred_action, pred_actions = self.model.run_inference(
                     observation=obs,
-                    stats=self.dataset_stats,
                 )
+                if any(action[2] < -0.05 for action in pred_action):
+                    continue
                 # Visualize denoising
                 # for a in pred_actions:
                 #     self.scene.clear_debug_objects()
-                #     self.draw_action(a)  # Fixed method call
+                #     gs_utils.draw_action_trajectory(self.scene, a, self.ee_z_offset, radius=0.01)  # Fixed method call
 
                 # Loop through each waypoint in the predicted action
                 print("pred_action:",pred_action)
-                gs_utils.draw_action_trajectory(self.scene, pred_action, self.ee_z_offset, radius=0.1)
-                time.sleep(2)
+
+                # gs_utils.draw_action_trajectory(self.scene, pred_action, self.ee_z_offset, radius=0.01)
 
                 self.do_action(pred_action)
                 

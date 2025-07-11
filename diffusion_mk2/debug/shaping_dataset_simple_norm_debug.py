@@ -6,7 +6,7 @@ from torch.utils.data import Subset
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 from diffusion_mk2.model.normalization_simple import denormalize_data
-from diffusion_mk2.dataset.shaping_dataset import ShapingDataset 
+from diffusion_mk2.dataset.shaping_dataset_simple import ShapingDataset 
 
 # Configure numpy printing
 np.set_printoptions(precision=8, suppress=True, linewidth=100, threshold=1000)
@@ -195,7 +195,7 @@ def plot_animated_comparison(
             ax.set_zlim(z_min, z_max)
 
             # Vista top‑down: elevazione 90°, rotazione orizzontale  -90° (opzionale)
-            ax.view_init(elev=90, azim=-90)
+            # ax.view_init(elev=90, azim=-90)
 
         plt.tight_layout()
         plt.pause(interval)
