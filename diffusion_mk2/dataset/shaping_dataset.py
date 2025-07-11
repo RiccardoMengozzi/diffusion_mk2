@@ -14,15 +14,9 @@
 import numpy as np
 import zarr
 import torch
-from diffusion_mk2.model.normalization_simple import (
-    get_data_stats,
-    normalize_data,
-)
+from tqdm import tqdm
+from diffusion_mk2.model import normalization_pca
 
-np.set_printoptions(precision=4,    # number of decimal places
-                    suppress=True,  # suppress scientific notation
-                    linewidth=100,  # characters per line
-                    threshold=1000) # controls summarization of large arrays
 
 def create_sample_indices(
     episode_ends: np.ndarray,
@@ -100,6 +94,8 @@ def sample_sequence(
     return result
 
 
+# normalize data
+
 
 # dataset
 class ShapingDataset(torch.utils.data.Dataset):
@@ -141,6 +137,13 @@ class ShapingDataset(torch.utils.data.Dataset):
             pad_after=action_horizon - 1,
         )
 
+        # compute statistics and normalized data to [-1,1]
+        # stats = dict()
+        # normalized_train_data = dict()
+        # for key, data in train_data.items():
+        #     stats[key] = get_data_stats(data)
+        #     normalized_train_data[key] = normalize_data(data, stats[key])
+
         self.initial_shapes_processor = None
         self.final_shapes_processor = None
         self.ee_states_processor = None
@@ -151,108 +154,93 @@ class ShapingDataset(torch.utils.data.Dataset):
         self.action_horizon = action_horizon
         self.obs_horizon = obs_horizon
 
-        # Divide the observation data into components
-        train_data_divided = {
-            "obs_ee": train_data["obs"][:, :obs_ee_dim],  # (N, obs_ee_dim)
-            "obs_dlo": train_data["obs"][:, obs_ee_dim:obs_ee_dim + obs_dlo_dim].reshape(-1, obs_dlo_dim // 3, 3),  # (N, obs_dlo_dim // 3, 3)
-            "obs_target": train_data["obs"][:, obs_ee_dim + obs_dlo_dim:obs_ee_dim + obs_dlo_dim + obs_target_dim].reshape(-1, obs_target_dim // 3, 3),  # (N, obs_target_dim // 3, 3)
-            "action": train_data["action"],  # (N, action_dim)
+
+        self.stats = self.get_data_stats(train_data)
+        self.normalized_train_data = self.normalize_data(train_data)
+
+    def get_data_stats(self, data):
+        ee_states = data["obs"][:, : self.obs_ee_dim]
+        dlo_states = data["obs"][:, self.obs_ee_dim : self.obs_ee_dim + self.obs_dlo_dim]
+        target_shapes = data["obs"][:,self.obs_ee_dim + self.obs_dlo_dim : self.obs_ee_dim + self.obs_dlo_dim + self.obs_target_dim,]
+        actions = data["action"]
+
+
+        ee_states_stats = normalization_pca.get_data_stats(ee_states)
+        dlo_states_stats = normalization_pca.get_data_stats(dlo_states)
+        target_shapes_stats = normalization_pca.get_data_stats(target_shapes)
+        actions_stats = normalization_pca.get_data_stats(actions)
+
+        return {
+            "obs_ee": ee_states_stats,
+            "obs_dlo": dlo_states_stats,
+            "obs_target": target_shapes_stats,
+            "action": actions_stats,
         }
 
-        # Get unified spatial statistics for all x,y,z coordinates
-        ee_spatial = train_data_divided["obs_ee"][:, :3]  # x, y, z from EE
-        dlo_spatial = train_data_divided["obs_dlo"].reshape(-1, 3)  # All DLO points
-        target_spatial = train_data_divided["obs_target"].reshape(-1, 3)  # All target points
-        
-        # Combine all spatial coordinates to get unified statistics
-        all_spatial_coords = np.concatenate([
-            ee_spatial,
-            dlo_spatial,
-            target_spatial
-        ], axis=0)
-        
-        # Get unified spatial statistics
-        unified_spatial_stats = get_data_stats(all_spatial_coords)
-        
-        # Calculate statistics for each component
-        stats = dict()
-        
-        # EE stats: split into spatial and non-spatial components
-        ee_theta = train_data_divided["obs_ee"][:, 3:4]   # theta
-        ee_gripper = train_data_divided["obs_ee"][:, 4:5] # gripper
-        
-        stats["obs_ee_spatial"] = unified_spatial_stats
-        stats["obs_ee_theta"] = get_data_stats(ee_theta)
-        stats["obs_ee_gripper"] = get_data_stats(ee_gripper)
-        
-        # DLO and target use unified spatial stats
-        stats["obs_dlo"] = unified_spatial_stats
-        stats["obs_target"] = unified_spatial_stats
-        
-        # Action stats
-        stats["action"] = get_data_stats(train_data_divided["action"])
 
-        # Apply normalization with unified spatial stats
-        normalized_train_data = dict()
-        
-        # Normalize EE components separately
-        ee_spatial_norm = normalize_data(ee_spatial, stats["obs_ee_spatial"], keep_zero_centered=False)
-        ee_theta_norm = normalize_data(ee_theta, stats["obs_ee_theta"], keep_zero_centered=False)
-        ee_gripper_norm = normalize_data(ee_gripper, stats["obs_ee_gripper"], keep_zero_centered=False)
-        
-        # Combine normalized EE components
-        normalized_train_data["obs_ee"] = np.concatenate([
-            ee_spatial_norm, 
-            ee_theta_norm, 
-            ee_gripper_norm
-        ], axis=1)
-        
-        # Normalize DLO and target with unified spatial stats
-        dlo_reshaped = train_data_divided["obs_dlo"].reshape(-1, 3)
-        target_reshaped = train_data_divided["obs_target"].reshape(-1, 3)
-        
-        dlo_normalized = normalize_data(dlo_reshaped, stats["obs_dlo"], keep_zero_centered=False)
-        target_normalized = normalize_data(target_reshaped, stats["obs_target"], keep_zero_centered=False)
-        
-        # Reshape back to original structure
-        normalized_train_data["obs_dlo"] = dlo_normalized.reshape(-1, obs_dlo_dim // 3, 3)
-        normalized_train_data["obs_target"] = target_normalized.reshape(-1, obs_target_dim // 3, 3)
-        
-        # Normalize actions
-        normalized_train_data["action"] = normalize_data(train_data_divided["action"], stats["action"], keep_zero_centered=True)
+    def normalize_data(self, data):
 
-        # Debug prints
-        print("Original EE[0] (first 3 spatial):", train_data_divided["obs_ee"][0, :3])
-        print("Normalized EE[0] (first 3 spatial):", normalized_train_data["obs_ee"][0, :3])
-        print("Original DLO[0] first point:", train_data_divided["obs_dlo"][0, 0])
-        print("Normalized DLO[0] first point:", normalized_train_data["obs_dlo"][0, 0])
+        ee_states = data["obs"][:, : self.obs_ee_dim]
+        dlo_states = data["obs"][:, self.obs_ee_dim : self.obs_ee_dim + self.obs_dlo_dim]
+        target_shapes = data["obs"][:,self.obs_ee_dim + self.obs_dlo_dim : self.obs_ee_dim + self.obs_dlo_dim + self.obs_target_dim]
 
-        # Concatenate normalized observations back together
-        # Flatten the 3D components when concatenating
-        norm_obs = np.concatenate(
-            [
-                normalized_train_data["obs_ee"],  # Use normalized EE
-                normalized_train_data["obs_dlo"].reshape(-1, obs_dlo_dim),  # Flatten normalized DLO
-                normalized_train_data["obs_target"].reshape(-1, obs_target_dim),  # Flatten normalized Target
-            ],
-            axis=1,
-        )
+        dlo_states = dlo_states.reshape(-1, self.obs_dlo_dim // 3, 3)
+        target_shapes = target_shapes.reshape(-1, self.obs_target_dim // 3, 3)
+
+        ee_states_pos = ee_states[:, :3]  # [x, y, z]
+        ee_states_theta = ee_states[:, 3]  # [theta]
+        ee_states_gripper = ee_states[:, 4]  # [gripper
+
+        actions = data["action"]
+        actions_pos = actions[:, :3]  # [dx, dy, dz]
+        actions_theta = actions[:, 3]  # [dtheta]
+        actions_gripper = actions[:, 4]  # [dgripper]
+
+
+        normalized_observations = []
+        normalized_actions  = []
         
-        # Create the final normalized dataset
-        normalized_concat_train_data = {
-            "obs": norm_obs, 
-            "action": normalized_train_data["action"], 
+        for ee_pos, ee_theta, ee_grip, dlo, target, act_pos, act_theta, act_grip in tqdm(zip(
+            ee_states_pos,
+            ee_states_theta,
+            ee_states_gripper,
+            dlo_states,
+            target_shapes,
+            actions_pos,
+            actions_theta,
+            actions_gripper,
+        ), desc="Normalizing data", total=len(ee_states_pos)):
+            
+            cs0, csR = normalization_pca.compute_normalize_factors(dlo)
+            ee_pos_n = normalization_pca.normalize_pca(ee_pos, cs0, csR)
+            dlo_n = normalization_pca.normalize_pca(dlo, cs0, csR)
+            target_n = normalization_pca.normalize_pca(target, cs0, csR)
+            action_pos_n = normalization_pca.normalize_pca(act_pos, cs0, csR, rotation_only=True)
+            ee_theta_n = normalization_pca.normalize_min_max(ee_theta, self.stats["obs_ee"]["min"][3], self.stats["obs_ee"]["max"][3])
+            ee_gripper_n = normalization_pca.normalize_min_max(ee_grip, self.stats["obs_ee"]["min"][4], self.stats["obs_ee"]["max"][4])
+            action_theta_n = normalization_pca.normalize_min_max(act_theta, self.stats["action"]["min"][3], self.stats["action"]["max"][3])
+            action_gripper_n = normalization_pca.normalize_min_max(act_grip, self.stats["action"]["min"][4], self.stats["action"]["max"][4])
+
+            ee_state_n = np.concatenate([ee_pos_n.squeeze(), np.array([ee_theta_n]), np.array([ee_gripper_n])])
+            action_n = np.concatenate([action_pos_n, np.array([action_theta_n]), np.array([action_gripper_n])])
+
+            ee_state_n = ee_state_n.flatten()
+            dlo_n = dlo_n.flatten()
+            target_n = target_n.flatten()
+            
+            normalized_observations.append(np.concatenate([ee_state_n, dlo_n, target_n]))
+            normalized_actions.append(action_n)
+
+        normalized_observations = np.array(normalized_observations)
+        normalized_actions = np.array(normalized_actions)
+
+    
+
+        return {
+            "obs": normalized_observations,
+            "action": normalized_actions,
         }
-        
-        self.normalized_train_data = normalized_concat_train_data
-        self.stats = stats
-
-        # Print dataset statistics
-        print("Unified spatial stats: min={}, max={}".format(unified_spatial_stats['min'], unified_spatial_stats['max']))
-        print("EE theta stats: min={}, max={}".format(stats["obs_ee_theta"]['min'], stats["obs_ee_theta"]['max']))
-        print("EE gripper stats: min={}, max={}".format(stats["obs_ee_gripper"]['min'], stats["obs_ee_gripper"]['max']))
-        print("Action stats: min={}, max={}".format(stats["action"]['min'], stats["action"]['max']))
-
+            
     def __len__(self):
         # all possible segments of the dataset
         return len(self.indices)
@@ -292,7 +280,10 @@ if __name__ == "__main__":
 
     print("Dataset length:", len(dataset))
     sample = dataset[3]
-    print("Episode ends:", dataset.episode_ends)
-    print("Sample keys:", sample.keys())
-    print("Sample obs shape:", sample['obs'].shape)
-    print("Sample action shape:", sample['action'].shape)
+    print("episode ends:", dataset.episode_ends)
+    # print("Sample keys:", sample.keys())
+    # print("Sample obs shape:", sample['obs'].shape)
+    # print("Sample action shape:", sample['action'].shape)
+    # print("Stats:", dataset.stats)
+    # print("First 20 obs:", sample['obs'])
+    # print("First 20 actions:", sample['action'][:20])

@@ -9,15 +9,15 @@ import torch
 import numpy as np
 from diffusers import DDPMScheduler
 from diffusion_mk2.model.diffusion.conditional_unet_1d import ConditionalUnet1D
-from diffusion_mk2.model.normalization import (
-    ActionDataProcessor,
-    DloDataProcessor,
-    EEStateDataProcessor,
+from diffusion_mk2.model.normalization_simple import (
+    get_data_stats,
+    normalize_data,
+    denormalize_data
 )
 from typing import Tuple, Dict, Union, Any
 
 
-class ShapingInference:
+class ShapingInferenceSimpleNorm:
     """
     Simplified diffusion model inference for robotic action prediction.
     
@@ -44,9 +44,6 @@ class ShapingInference:
         self._load_checkpoint(ckp_path)
         
         # Initialize processors
-        self.dlo_processor = DloDataProcessor()
-        self.ee_processor = EEStateDataProcessor()
-        self.action_processor = ActionDataProcessor(is_first_idx=False, is_last_gripper=True)
         
         # Initialize model and scheduler
         self._initialize_model()
@@ -145,6 +142,9 @@ class ShapingInference:
         """Process observation for model conditioning."""
         # Extract components
         ee_states = observation[:, :self.obs_ee_dim]
+        ee_states_pos = ee_states[:, :3]  # [x, y, z]
+        ee_states_theta = ee_states[:, 3]  # [theta]
+        ee_states_gripper = ee_states[:, 4]  # [gripper
         
         initial_shape_start = self.obs_ee_dim
         initial_shape_end = initial_shape_start + self.obs_dlo_dim
@@ -158,29 +158,44 @@ class ShapingInference:
             self.obs_horizon, self.obs_target_dim // 3, 3
         )
 
-        # Compute normalization factors
-        cs0_list, csR_list = self.dlo_processor.compute_normalize_factors_arrays(initial_shapes)
-        self.most_recent_csR = csR_list[-1]
+        ee_states_pos_n = normalize_data(
+            ee_states_pos.cpu().numpy(),
+            self.dataset_stats["obs_ee_spatial"],
+            keep_zero_centered=False
+        )
 
-        # Preprocess components
-        initial_shape_n = self.dlo_processor.preprocess(
-            data=initial_shapes, cs0_list=cs0_list, csR_list=csR_list
+        ee_states_theta_n = normalize_data(
+            ee_states_theta.cpu().numpy(),
+            self.dataset_stats["obs_ee_theta"],
+            keep_zero_centered=False
+        ).reshape(-1, 1)
+
+        ee_states_gripper_n = normalize_data(
+            ee_states_gripper.cpu().numpy(),
+            self.dataset_stats["obs_ee_gripper"],
+            keep_zero_centered=False
+        ).reshape(-1, 1)
+
+        initial_shape_n = normalize_data(
+            initial_shapes.cpu().numpy(),
+            self.dataset_stats["obs_dlo"],
+            keep_zero_centered=False
         ).reshape(-1, self.obs_dlo_dim)
-        
-        target_shape_n = self.dlo_processor.preprocess(
-            data=target_shapes, cs0_list=cs0_list, csR_list=csR_list
-        ).reshape(-1, self.obs_target_dim)
-        
-        ee_state_n = self.ee_processor.preprocess(
-            data=ee_states,
-            cs0_list=cs0_list,
-            csR_list=csR_list,
-            min=self.dataset_stats["ee_state"]["min"],
-            max=self.dataset_stats["ee_state"]["max"],
-        )[0].reshape(-1, self.obs_ee_dim)
 
-        # Concatenate and prepare for model
-        obs_cond = np.concatenate([ee_state_n, initial_shape_n, target_shape_n], axis=1).flatten()
+        target_shape_n = normalize_data(
+            target_shapes.cpu().numpy(),
+            self.dataset_stats["obs_target"],
+            keep_zero_centered=False
+        ).reshape(-1, self.obs_target_dim)
+
+        obs_cond = np.concatenate([
+            ee_states_pos_n,
+            ee_states_theta_n,
+            ee_states_gripper_n,
+            initial_shape_n,
+            target_shape_n
+        ], axis=1).flatten()
+
         return torch.tensor(obs_cond, dtype=torch.float32, device=self.device).unsqueeze(0)
 
     def _denoise_actions(self, obs_cond: torch.Tensor) -> Tuple[torch.Tensor, list]:
@@ -235,12 +250,10 @@ class ShapingInference:
         #     print(f"Dataset stats for {key}: min={data['min']}, max={data['max']}")
 
         # Denormalize final action
-        action_pred = self.action_processor.denormalize(
+        action_pred = denormalize_data(
             final_action_np,
-            descale=True,
-            csR=self.most_recent_csR,
-            min=self.dataset_stats["action"]["min"],
-            max=self.dataset_stats["action"]["max"]
+            self.dataset_stats["action"],
+            keep_zero_centered=True
         )
         
         # Extract executable actions (receding horizon)
@@ -251,12 +264,10 @@ class ShapingInference:
         # Process full trajectory
         full_trajectory = []
         for action in trajectory:
-            denormalized = self.action_processor.denormalize(
+            denormalized = denormalize_data(
                 action,
-                descale=True,
-                csR=self.most_recent_csR,
-                min=self.dataset_stats["action"]["min"],
-                max=self.dataset_stats["action"]["max"]
+                self.dataset_stats["action"],
+                keep_zero_centered=True
             )
             full_trajectory.append(denormalized)
         
@@ -300,29 +311,26 @@ class ShapingInference:
 if __name__ == "__main__":
     """Example usage of the ShapingInference class."""
     
-    checkpoint_path = "/home/mengo/Research/LLM_DOM/diffusion_mk2/weights/chkp_dummy-529qk1bd_epoch_30.pt"
+    checkpoint_path = "/home/mengo/Research/LLM_DOM/diffusion_mk2/weights/chkp_deep-bird-38_epoch_2200.pt"
+
+    # Initialize model
+    model = ShapingInferenceSimpleNorm(checkpoint_path, verbose=True)
+    print("Model loaded successfully!")
     
-    try:
-        # Initialize model
-        model = ShapingInference(checkpoint_path, verbose=True)
-        print("Model loaded successfully!")
-        
-        # Create dummy observation data
-        dummy_obs = np.random.randn(model.obs_horizon, model.obs_dim)
-        print(f"Input observation shape: {dummy_obs.shape}")
-        
-        # Run inference
-        actions, trajectory = model.run_inference(dummy_obs)
-        
-        print(f"Executable actions shape: {actions.shape}")
-        print(f"Full trajectory shape: {trajectory.shape}")
-        print(f"First action to execute: {actions[0]}")
-        
-        # Example of silent operation
-        print("\n--- Silent mode example ---")
-        silent_model = ShapingInference(checkpoint_path, verbose=False)
-        silent_actions, _ = silent_model.run_inference(dummy_obs)
-        print("Silent inference completed successfully!")
-        
-    except Exception as e:
-        print(f"Error during inference: {e}")
+    # Create dummy observation data
+    dummy_obs = np.random.randn(model.obs_horizon, model.obs_dim)
+    print(f"Input observation shape: {dummy_obs.shape}")
+    
+    # Run inference
+    actions, trajectory = model.run_inference(dummy_obs)
+    
+    print(f"Executable actions shape: {actions.shape}")
+    print(f"Full trajectory shape: {trajectory.shape}")
+    print(f"First action to execute: {actions[0]}")
+    
+    # Example of silent operation
+    print("\n--- Silent mode example ---")
+    silent_model = ShapingInferenceSimpleNorm(checkpoint_path, verbose=False)
+    silent_actions, _ = silent_model.run_inference(dummy_obs)
+    print("Silent inference completed successfully!")
+    
