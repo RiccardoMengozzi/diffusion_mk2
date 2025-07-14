@@ -25,21 +25,21 @@ hyperparameters = {
     "action_horizon": 8,
     "pred_horizon": 16,
     "num_diffusion_iters": 100,
-    "num_epochs": 10000,
-    "batch_size": 500,
+    "num_epochs": 100,
+    "batch_size": 2,
     "lr": 1e-4,
     "weight_decay": 1e-6,
     "warmup_steps": 500,
     "ema_power": 0.75,
     "device": torch.device("cuda"),  # Will default to CUDA if available
     "model_save_path": "weights/diffusion_transformer_model.pth",
-    "checkpoint_save_interval": 1000,  # Save checkpoint every N epochs
-    "dataset_path": os.path.join(PROJECT_DIR, "zarr_data", "dataset_short.zarr.zip"),
+    "checkpoint_save_interval": 10,  # Save checkpoint every N epochs
+    "dataset_path": os.path.join(PROJECT_DIR, "zarr_data", "dataset_cleaned_short.zarr.zip"),
 
     # Transformer specific parameters
-    "n_layer": 12,
-    "n_head": 12,
-    "n_emb": 768,
+    "n_layer": 2,
+    "n_head": 2,
+    "n_emb": 24,
     "p_drop_emb": 0.1,
     "p_drop_attn": 0.1,
     "causal_attn": True,
@@ -50,7 +50,7 @@ hyperparameters = {
     # wandb
     "project_name": "diffusion_model",
     "entity": "riccardo_mengozzi",
-    "wandb_mode": "online",  # Change to "online" to enable logging
+    "wandb_mode": "disabled",  # Change to "online" to enable logging
 }
 
 class DiffusionTransformerTrainer:
@@ -322,7 +322,7 @@ class DiffusionTransformerTrainer:
         
         # Ensure the directory exists
         os.makedirs(os.path.dirname(self.MODEL_SAVE_PATH), exist_ok=True)
-        print(f"Saving final EMA model to {self.MODEL_SAVE_PATH}")
+        
         torch.save(
             {
                 "model_state_dict": ema_model.state_dict(),

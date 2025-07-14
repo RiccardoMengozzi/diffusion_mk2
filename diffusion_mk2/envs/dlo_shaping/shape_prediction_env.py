@@ -14,7 +14,7 @@ import diffusion_mk2.utils.gs_utils as gs_utils
 from diffusion_mk2.utils.utils import load_yaml
 from scipy.spatial.transform import Rotation as R
 from diffusion_mk2.utils.dlo_shapes import U_SHAPE, S_SHAPE, ONE_ACTION_SHAPE, ONE_ACTION_SHAPE2
-from diffusion_mk2.inference.shaping_inference import ShapingInference
+from diffusion_mk2.inference.shaping_inference_simple_norm import ShapingInferenceSimpleNorm
 
 
 
@@ -199,7 +199,7 @@ class ShapingEnv():
         # self.target = random.choice(SHAPES)
         self.target = U_SHAPE  # For testing purposes, use a fixed shape
         #### Initialize model and observation deque ####
-        self.model = ShapingInference(self.model_path, device=gs.device)
+        self.model = ShapingInferenceSimpleNorm(self.model_path, device=gs.device)
         model_for_stats = torch.load("/home/mengo/Research/LLM_DOM/diffusion_mk2/weights/chkp_dummy-529qk1bd_epoch_30.pt",
                                           map_location=gs.device,
                                           weights_only=False)
@@ -403,7 +403,6 @@ class ShapingEnv():
                 pred_action, pred_actions = self.model.run_inference(
                     observation=obs,
                 )
-                print("pred_action:",pred_action)
                 if any(action[2] < -0.05 for action in pred_action):
                     continue
                 # Visualize denoising
@@ -412,6 +411,7 @@ class ShapingEnv():
                 #     gs_utils.draw_action_trajectory(self.scene, a, self.ee_z_offset, radius=0.01)  # Fixed method call
 
                 # Loop through each waypoint in the predicted action
+                print("pred_action:",pred_action)
 
                 # gs_utils.draw_action_trajectory(self.scene, pred_action, self.ee_z_offset, radius=0.01)
 
@@ -425,7 +425,7 @@ class ShapingEnv():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Teleop Push Data Generator")
-    parser.add_argument("--cfg", type=str, default="diffusion_mk2/config/shaping_prediction_env_config.yaml", help="Path to the configuration file")
+    parser.add_argument("--cfg", type=str, default="diffusion_mk2/config/dlo_shapes_with_grasping_env.yaml", help="Path to the configuration file")
     parser.add_argument("-v", "--vis", action="store_true")
     parser.add_argument("-g", "--gui", action="store_true", help="Enable GUI mode")
     parser.add_argument("-c", "--cpu", action="store_true", help="Run on CPU instead of GPU")

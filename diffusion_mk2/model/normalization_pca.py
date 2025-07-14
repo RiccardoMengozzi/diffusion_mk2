@@ -35,27 +35,42 @@ def is_dlo_linear(dlo_centered, dlo_range, linear_threshold=1000):
 
 def compute_linear_coordinate_system(dlo_centered):
     """Compute coordinate system for linear DLO."""
-    # Create coordinate system aligned with main axis
-    csR = np.eye(3)
     
-    # Compute actual direction of the DLO
+    # Check if the data is 2D or 3D
+    is_2d = dlo_centered.shape[1] == 2
+    
+    # Create coordinate system aligned with the main axis (identity matrix for 2D or 3D)
+    csR = np.eye(dlo_centered.shape[1])
+    
+    # Compute direction of the DLO
     first_point = dlo_centered[0]
     last_point = dlo_centered[-1]
     direction = last_point - first_point
     direction = direction / (np.linalg.norm(direction) + 1e-6)
     
-    # Align first axis with DLO direction
-    csR[0] = direction
+    # In 2D, the direction is just a 2D vector
+    if is_2d:
+        # Align first axis with DLO direction
+        csR[0] = direction
+        
+        # Compute the perpendicular vector (orthogonal to the direction)
+        csR[1] = np.array([-direction[1], direction[0]])  # Perpendicular in 2D
+        
+        csR[1] = csR[1] / (np.linalg.norm(csR[1]) + 1e-6)
     
-    # Create orthogonal axes
-    if abs(direction[2]) < 0.9:  # Not aligned with Z
-        csR[1] = np.cross(direction, [0, 0, -1]) #-1 otherwise z becomes negative
-    else:  # Aligned with Z, use X
-        csR[1] = np.cross(direction, [1, 0, 0])
-    
-    csR[1] = csR[1] / (np.linalg.norm(csR[1]) + 1e-6)
-    csR[2] = np.cross(csR[0], csR[1])
-    
+    else:
+        # In 3D, align first axis with DLO direction
+        csR[0] = direction
+        
+        # Create orthogonal axes
+        if abs(direction[2]) < 0.9:  # Not aligned with Z axis
+            csR[1] = np.cross(direction, [0, 0, -1])  # Cross with negative Z axis
+        else:  # Aligned with Z, use X axis
+            csR[1] = np.cross(direction, [1, 0, 0])
+        
+        csR[1] = csR[1] / (np.linalg.norm(csR[1]) + 1e-6)
+        csR[2] = np.cross(csR[0], csR[1])  # Third axis is perpendicular to the first two
+
     return csR
 
 def compute_pca_coordinate_system(dlo_centered):
@@ -105,7 +120,7 @@ def normalize_pca(data, cs0, csR, rotation_only=False):
         return data_n
     
     data_n = (csR @ (data - cs0).T).T
-    return data_n
+    return data_n.squeeze()
 
 
 def denormalize_pca(data_n, cs0, csR, rotation_only=False):
@@ -117,6 +132,15 @@ def denormalize_pca(data_n, cs0, csR, rotation_only=False):
     data = (csR.T @ data_n.T).T + cs0
     return data
 
+def denormalize_pca_batch(data_n, cs0, csR, rotation_only=False):
+    data = []
+    for dn in data_n:
+        if rotation_only:
+            d = (csR.T @ dn.T).T
+        else:
+            d = (csR.T @ dn.T).T + cs0
+        data.append(d)
+    return np.array(data)
 
 
 def normalize_min_max(data, min, max):
@@ -128,3 +152,10 @@ def denormalize_min_max(data_n, min, max):
     data_n = (data_n + 1) / 2  # Normalize to [0, 1]
     data = data_n * (max - min) + min
     return data
+
+def denormalize_min_max_batch(data_n, min, max):
+    data = []
+    for dn in data_n:
+        d = (dn + 1) / 2 * (max - min) + min
+        data.append(d)
+    return np.array(data)
