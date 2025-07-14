@@ -32,46 +32,33 @@ RANDOM_SHAPE = [
 ]
 
 RANDOM_TARGET = [
-    [0.5167364478111267, 0.09626814723014832, 0.7029712200164795],
-    [0.5156363844871521, 0.08427868783473969, 0.7035102844238281],
-    [0.5141038298606873, 0.06994378566741943, 0.7032839059829712],
-    [0.5125567317008972, 0.05607892572879791, 0.7034321427345276],
-    [0.5109126567840576, 0.0419762097299099, 0.7035642266273499],
-    [0.5088381171226501, 0.027801604941487312, 0.7033417820930481],
-    [0.5060871839523315, 0.014096233062446117, 0.7035146355628967],
-    [0.5025281310081482, -0.0004252632206771523, 0.7033442854881287],
-    [0.4994399845600128, -0.014070695266127586, 0.7035157680511475],
-    [0.49714547395706177, -0.02833779901266098, 0.7033063173294067],
-    [0.49673935770988464, -0.04229258745908737, 0.7034505605697632],
-    [0.49893248081207275, -0.05626344308257103, 0.7040116786956787],
-    [0.5046352744102478, -0.06933712959289551, 0.703833281993866],
-    [0.5118126273155212, -0.0812348872423172, 0.7038783431053162],
-    [0.5182612538337708, -0.09208345413208008, 0.7042266726493835],
+    [0.5227354, 0.05167644, 0.70309025],
+    [0.53375965, 0.04684567, 0.7036251],
+    [0.54692805, 0.04094509, 0.70339483],
+    [0.5597578, 0.03540486, 0.7035428],
+    [0.57288355, 0.02992657, 0.70367193],
+    [0.58578736, 0.02363537, 0.7034466],
+    [0.5968107, 0.01501581, 0.70353395],
+    [0.601522, 0.00081029, 0.7034673],
+    [0.599685, -0.01317035, 0.7034919],
+    [0.5898543, -0.02381201, 0.70341164],
+    [0.5776969, -0.03069391, 0.7035469],
+    [0.56477267, -0.03661821, 0.70367104],
+    [0.551634, -0.04232463, 0.7034438],
+    [0.53882974, -0.04774107, 0.70359427],
+    [0.5272029, -0.05254408, 0.70393485],
 ]
 
 
 def main():
     parser = argparse.ArgumentParser(description="Teleop Push Data Generator")
-    parser.add_argument(
-        "--cfg",
-        type=str,
-        default="diffusion_mk2/config/dlo_shapes_with_grasping_env.yaml",
-        help="Path to the configuration file",
-    )
+    parser.add_argument("--cfg",type=str,default="diffusion_mk2/config/shaping_traj_prediction_env_config.yaml")
     parser.add_argument("-v", "--vis", action="store_true")
     parser.add_argument("-g", "--gui", action="store_true", help="Enable GUI mode")
-    parser.add_argument(
-        "-c", "--cpu", action="store_true", help="Run on CPU instead of GPU"
-    )
-    parser.add_argument(
-        "-f", "--show_fps", action="store_true", help="Show FPS in the viewer"
-    )
-    parser.add_argument(
-        "-e", "--n_episodes", type=int, default=1, help="Number of episodes to run"
-    )
-    parser.add_argument(
-        "-a", "--n_actions", type=int, default=1, help="Number of actions per episode"
-    )
+    parser.add_argument("-c", "--cpu", action="store_true", help="Run on CPU instead of GPU")
+    parser.add_argument("-f", "--show_fps", action="store_true", help="Show FPS in the viewer")
+    parser.add_argument("-e", "--n_episodes", type=int, default=1, help="Number of episodes to run")
+    parser.add_argument("-a", "--n_actions", type=int, default=1, help="Number of actions per episode")
     args = parser.parse_args()
 
     env = ShapingEnv(args=args)
@@ -103,27 +90,15 @@ def main():
             last_obs_n = obs_n[-1]
             ee_state = last_obs[: inf.obs_ee_dim]
             dlo_state = last_obs[inf.obs_ee_dim : inf.obs_ee_dim + inf.obs_dlo_dim]
-            target_shape = last_obs[
-                inf.obs_ee_dim
-                + inf.obs_dlo_dim : inf.obs_ee_dim
-                + inf.obs_dlo_dim
-                + inf.obs_target_dim
-            ]
+            target_shape = last_obs[inf.obs_ee_dim + inf.obs_dlo_dim : inf.obs_ee_dim + inf.obs_dlo_dim + inf.obs_target_dim]
             dlo_state = dlo_state.reshape(inf.obs_dlo_dim // 3, 3)
             target_shape = target_shape.reshape(inf.obs_target_dim // 3, 3)
 
-            ee_state_n = last_obs_n[: inf.obs_ee_dim]
+            ee_state_n = last_obs_n[: inf.obs_ee_dim].cpu()
             dlo_state_n = last_obs_n[inf.obs_ee_dim : inf.obs_ee_dim + inf.obs_dlo_dim]
-            target_shape_n = last_obs_n[
-                inf.obs_ee_dim
-                + inf.obs_dlo_dim : inf.obs_ee_dim
-                + inf.obs_dlo_dim
-                + inf.obs_target_dim
-            ]
+            target_shape_n = last_obs_n[inf.obs_ee_dim + inf.obs_dlo_dim : inf.obs_ee_dim + inf.obs_dlo_dim + inf.obs_target_dim]
             dlo_state_n = dlo_state_n.reshape(inf.obs_dlo_dim // 3, 3).cpu().numpy()
-            target_shape_n = (
-                target_shape_n.reshape(inf.obs_target_dim // 3, 3).cpu().numpy()
-            )
+            target_shape_n = (target_shape_n.reshape(inf.obs_target_dim // 3, 3).cpu().numpy())
 
             # Get action
             # Run denoising process
@@ -153,6 +128,7 @@ def main():
             ax1 = fig.add_subplot(2, 2, 1, projection='3d')
             ax1.plot(dlo_state[:, 0], dlo_state[:, 1], dlo_state[:, 2], "o-", label="DLO original", color='blue', linewidth=2, markersize=6)
             ax1.plot(target_shape[:, 0], target_shape[:, 1], target_shape[:, 2], "o-", label="Target original", color='red', linewidth=2, markersize=6)
+            ax1.plot(ee_state[0], ee_state[1], ee_state[2], "o", label="End Effector", color='green', markersize=8)
             ax1.set_title("Original DLO and Target (3D)")
             ax1.set_xlabel("X")
             ax1.set_ylabel("Y")
@@ -169,6 +145,7 @@ def main():
             ax2 = fig.add_subplot(2, 2, 2, projection='3d')
             ax2.plot(dlo_state_n[:, 0], dlo_state_n[:, 1], dlo_state_n[:, 2], "o-", label="DLO normalized", color='blue', linewidth=2, markersize=6)
             ax2.plot(target_shape_n[:, 0], target_shape_n[:, 1], target_shape_n[:, 2], "o-", label="Target normalized", color='red', linewidth=2, markersize=6)
+            ax2.plot(ee_state_n[0], ee_state_n[1], ee_state_n[2], "o", label="End Effector", color='green', markersize=8)
             ax2.set_title("Normalized DLO and Target (3D)")
             ax2.set_xlabel("X")
             ax2.set_ylabel("Y")

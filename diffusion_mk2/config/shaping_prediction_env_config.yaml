@@ -1,5 +1,5 @@
 inference:
-  model_path: weights/chkp_deep-bird-38_epoch_2200.pt
+  model_path: weights/chkp_golden-snowflake-37_epoch_3200.pt
   number_of_episodes: 10
   number_of_actions: 10
 

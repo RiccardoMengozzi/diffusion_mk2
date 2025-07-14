@@ -9,7 +9,7 @@ from diffusion_mk2.dataset.shape_prediction_dataset import DloDataset
 MAIN_DIR = os.path.join(os.path.dirname(__file__), "..")
 
 DATA_PATH = "/home/mengo/Research/LLM_DOM/diffusion_mk2/zarr_data/shape_prediction.zarr.zip"
-CHECKPOINT_PATH = "/home/mengo/Research/LLM_DOM/diffusion_mk2/checkpoints/shape_prediction/final_model.pth"
+CHECKPOINT_PATH = "/home/mengo/Research/LLM_DOM/diffusion_mk2/weights/shape_prediction_final_model.pt"
 
 state = torch.load(CHECKPOINT_PATH)
 ###################################
@@ -34,7 +34,11 @@ dataset = DloDataset(DATA_PATH, num_points=state["num_points"])
 loader = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=False, num_workers=0)
 
 for i, data in enumerate(loader):
-    dlo_0, dlo_1, action = data
+    
+    dlo_0, dlo_1, action = data["initial_shape"], data["final_shape"], data["action"]
+    dlo_0 = dlo_0.clone().detach().float()
+    dlo_1 = dlo_1.clone().detach().float()
+    action = action.clone().detach().float()
     pred = model(dlo_0, action)
     loss = loss_fcn(pred, dlo_1).item()
 
