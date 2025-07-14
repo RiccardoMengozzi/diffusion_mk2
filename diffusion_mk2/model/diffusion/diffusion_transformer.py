@@ -346,50 +346,50 @@ class TransformerForDiffusion(ModuleAttrMixin):
 
 def test():
     # GPT with time embedding
-    transformer = TransformerForDiffusion(
-        input_dim=16,
-        output_dim=16,
-        horizon=8,
-        n_obs_steps=4,
-        # cond_dim=10,
-        causal_attn=True,
-        # time_as_cond=False,
-        # n_cond_layers=4
-    )
-    opt = transformer.configure_optimizers()
+    # transformer = TransformerForDiffusion(
+    #     input_dim=16,
+    #     output_dim=16,
+    #     horizon=8,
+    #     n_obs_steps=4,
+    #     # cond_dim=10,
+    #     causal_attn=True,
+    #     # time_as_cond=False,
+    #     # n_cond_layers=4
+    # )
+    # opt = transformer.configure_optimizers()
 
-    timestep = torch.tensor(0)
-    sample = torch.zeros((4,8,16))
-    out = transformer(sample, timestep)
-    print("GPT with time embedding", out.shape)  # should be (4, 8, 16)
+    # timestep = torch.tensor(0)
+    # sample = torch.zeros((4,8,16))
+    # out = transformer(sample, timestep)
+    # print("GPT with time embedding", out.shape)  # should be (4, 8, 16)
     
 
-    # GPT with time embedding and obs cond
-    transformer = TransformerForDiffusion(
-        input_dim=16,
-        output_dim=16,
-        horizon=8,
-        n_obs_steps=4,
-        cond_dim=10,
-        causal_attn=True,
-        # time_as_cond=False,
-        # n_cond_layers=4
-    )
-    opt = transformer.configure_optimizers()
+    # # GPT with time embedding and obs cond
+    # transformer = TransformerForDiffusion(
+    #     input_dim=16,
+    #     output_dim=16,
+    #     horizon=8,
+    #     n_obs_steps=4,
+    #     cond_dim=10,
+    #     causal_attn=True,
+    #     # time_as_cond=False,
+    #     # n_cond_layers=4
+    # )
+    # opt = transformer.configure_optimizers()
     
-    timestep = torch.tensor(0)
-    sample = torch.zeros((4,8,16))
-    cond = torch.zeros((4,4,10))
-    out = transformer(sample, timestep, cond)
-    print("GPT with time embedding and obs cond", out.shape)  # should be (4, 8, 16)
+    # timestep = torch.tensor(0)
+    # sample = torch.zeros((4,8,16))
+    # cond = torch.zeros((4,4,10))
+    # out = transformer(sample, timestep, cond)
+    # print("GPT with time embedding and obs cond", out.shape)  # should be (4, 8, 16)
 
     # GPT with time embedding and obs cond and encoder
     transformer = TransformerForDiffusion(
-        input_dim=16,
-        output_dim=16,
-        horizon=8,
-        n_obs_steps=4,
-        cond_dim=10,
+        input_dim=5,
+        output_dim=5,
+        horizon=16,
+        n_obs_steps=2,
+        cond_dim=95,
         causal_attn=True,
         # time_as_cond=False,
         n_cond_layers=4
@@ -397,28 +397,29 @@ def test():
     opt = transformer.configure_optimizers()
     
     timestep = torch.tensor(0)
-    sample = torch.zeros((4,8,16))
-    cond = torch.zeros((4,4,10))
-    out = transformer(sample, timestep, cond)
+    batch = 4096
+    noised_action = torch.zeros((batch,16,5))
+    cond = torch.zeros((batch,2,95))
+    out = transformer(noised_action, timestep, cond)
     print("GPT with time embedding and obs cond and encoder", out.shape)  # should be (4, 8, 16)
 
     # BERT with time embedding token
-    transformer = TransformerForDiffusion(
-        input_dim=16,
-        output_dim=16,
-        horizon=8,
-        n_obs_steps=4,
-        # cond_dim=10,
-        # causal_attn=True,
-        time_as_cond=False,
-        # n_cond_layers=4
-    )
-    opt = transformer.configure_optimizers()
+    # transformer = TransformerForDiffusion(
+    #     input_dim=16,
+    #     output_dim=16,
+    #     horizon=8,
+    #     n_obs_steps=4,
+    #     # cond_dim=10,
+    #     # causal_attn=True,
+    #     time_as_cond=False,
+    #     # n_cond_layers=4
+    # )
+    # opt = transformer.configure_optimizers()
 
-    timestep = torch.tensor(0)
-    sample = torch.zeros((4,8,16))
-    out = transformer(sample, timestep)
-    print("BERT with time embedding token", out.shape)  # should be (4, 8, 16)
+    # timestep = torch.tensor(0)
+    # sample = torch.zeros((4,8,16))
+    # out = transformer(sample, timestep)
+    # print("BERT with time embedding token", out.shape)  # should be (4, 8, 16)
 
 
 if __name__ == "__main__":
