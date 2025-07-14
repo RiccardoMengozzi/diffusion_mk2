@@ -205,11 +205,7 @@ def plot_animated_comparison(
 
 def main():
     # Configuration
-<<<<<<< HEAD:diffusion_mk2/debug/trajectory_pred_dataset_debug.py
-    dataset_path = "/home/lar/Riccardo/diffusion_mk2/zarr_data/dataset.zarr.zip"
-=======
-    dataset_path = "/home/mengo/Research/LLM_DOM/diffusion_mk2/zarr_data/dataset_cleaned_short.zarr.zip"
->>>>>>> b42eaf513f318d126281107cbc7675875456927c:diffusion_mk2/debug/shaping_dataset_debug.py
+    dataset_path = "/home/lar/Riccardo/diffusion_mk2/zarr_data/dataset_short.zarr.zip"
     obs_ee_dim = 5  # [x, y, z, θ, grip]
     obs_shape_dim = 45  # 15 points * 3
     obs_target_dim = 45
