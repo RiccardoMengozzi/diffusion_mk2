@@ -35,7 +35,7 @@ hyperparameters = {
     "model_save_path": "",
     "checkpoint_save_interval": 1000,  # Save checkpoint every N epochs
     "dataset_path": os.path.join(
-        PROJECT_DIR, "zarr_data", "dataset_simplified.zarr.zip"
+        PROJECT_DIR, "zarr_data", "combined_dataset_simplified.zarr.zip"
     ),
     # wandb
     "project_name": "diffusion_model",
