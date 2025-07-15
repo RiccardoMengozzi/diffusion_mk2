@@ -1,4 +1,5 @@
 import torch
+import json
 import numpy as np
 import matplotlib.pyplot as plt
 from diffusion_mk2.model.simple_fc.fc_mul import EarlyStopping, FCMul
@@ -6,10 +7,12 @@ from diffusion_mk2.dataset.shape_prediction_dataset import DloDataset
 from diffusion_mk2.model import normalization_pca
 
 
-np.set_printoptions(precision=4,    # number of decimal places
-                    suppress=True,  # suppress scientific notation
-                    linewidth=100,  # characters per line
-                    threshold=1000) # controls summarization of large arrays
+np.set_printoptions(
+    precision=4,  # number of decimal places
+    suppress=True,  # suppress scientific notation
+    linewidth=100,  # characters per line
+    threshold=1000,
+)  # controls summarization of large arrays
 
 
 INITIAL_SHAPE = [
@@ -30,6 +33,24 @@ INITIAL_SHAPE = [
     [0.5000271201133728, -0.097350113093853, 0.7038936018943787],
 ]
 
+INITIAL_SHAPE2 = [
+    [0.5098176598548889, 0.09619959443807602, 0.7029239535331726],
+    [0.5087174773216248, 0.08420448750257492, 0.7034635543823242],
+    [0.5071823596954346, 0.06986713409423828, 0.7032378315925598],
+    [0.5056365132331848, 0.0560012124478817, 0.7033860683441162],
+    [0.5039926171302795, 0.04189841449260712, 0.7035178542137146],
+    [0.5019183158874512, 0.027723772451281548, 0.7032956480979919],
+    [0.49916666746139526, 0.01401852909475565, 0.7034683227539062],
+    [0.4956073760986328, -0.0005029179737903178, 0.7032980918884277],
+    [0.49251899123191833, -0.014148346148431301, 0.7034692764282227],
+    [0.4902229309082031, -0.02841532789170742, 0.703260064125061],
+    [0.4898168742656708, -0.04237056151032448, 0.7034040689468384],
+    [0.4920097291469574, -0.05634232610464096, 0.7039608955383301],
+    [0.4977140724658966, -0.06941630691289902, 0.7037822604179382],
+    [0.5048942565917969, -0.08131605386734009, 0.7038280367851257],
+    [0.511346161365509, -0.09216979891061783, 0.7041739821434021],
+]
+
 TARGET_SHAPE = [
     [0.5017937421798706, 0.06600702553987503, 0.703045129776001],
     [0.5006880164146423, 0.0540233850479126, 0.7035818696022034],
@@ -47,6 +68,25 @@ TARGET_SHAPE = [
     [0.46772992610931396, -0.11220502853393555, 0.7035718560218811],
     [0.46852532029151917, -0.1247471496462822, 0.703890860080719],
 ]
+
+TARGET_SHAPE2 = [
+    [0.5097389221191406, 0.08994009345769882, 0.7029209733009338],
+    [0.508328378200531, 0.07797549664974213, 0.7034686803817749],
+    [0.506314754486084, 0.06370138376951218, 0.7032462954521179],
+    [0.504052996635437, 0.04993632063269615, 0.7033881545066833],
+    [0.5010848641395569, 0.036062393337488174, 0.7035217881202698],
+    [0.49696195125579834, 0.022336773574352264, 0.7033019661903381],
+    [0.49192124605178833, 0.009278922341763973, 0.7034813761711121],
+    [0.48613595962524414, -0.004534755367785692, 0.7033276557922363],
+    [0.4808559715747833, -0.017511596903204918, 0.7036956548690796],
+    [0.4762074649333954, -0.031188488006591797, 0.7038674354553223],
+    [0.4740716814994812, -0.04494089633226395, 0.7035360932350159],
+    [0.4771314859390259, -0.058660779148340225, 0.7039633393287659],
+    [0.4860174059867859, -0.06975298374891281, 0.7037873864173889],
+    [0.4969460368156433, -0.07834946364164352, 0.7038314342498779],
+    [0.5071049332618713, -0.08586764335632324, 0.7041720747947693],
+]
+
 
 def to_numpy(x):
     if isinstance(x, torch.Tensor):
@@ -100,8 +140,8 @@ class ActionFinderGradient:
         np.random.seed()  # to reeseed allowing different initial displacements for every process
 
         # DISPLACEMENT
-        node_pos = (dlo_0[idx] + dlo_0[idx + 1]) / 2
-        node_target = (dlo_1[idx] + dlo_1[idx + 1]) / 2
+        node_pos = dlo_0[idx]
+        node_target = dlo_1[idx]
         direction = node_target - node_pos
 
         f = np.random.normal(0.5, 0.2, size=2)
@@ -112,15 +152,15 @@ class ActionFinderGradient:
             disp = disp / max * 0.1
 
         # THETA
-        dir_init = dlo_0[idx + 1] - dlo_0[idx]
-        dir_init = dir_init / np.linalg.norm(dir_init)
-        dir_target = dlo_1[idx + 1] - dlo_1[idx]
-        dir_target = dir_target / np.linalg.norm(dir_target)
-        angle_target = np.arctan2(dir_target[1], dir_target[0])
-        angle_init = np.arctan2(dir_init[1], dir_init[0])
+        # dir_init = dlo_0[idx + 1] - dlo_0[idx]
+        # dir_init = dir_init / np.linalg.norm(dir_init)
+        # dir_target = dlo_1[idx + 1] - dlo_1[idx]
+        # dir_target = dir_target / np.linalg.norm(dir_target)
+        # angle_target = np.arctan2(dir_target[1], dir_target[0])
+        # angle_init = np.arctan2(dir_init[1], dir_init[0])
 
-        theta = np.random.normal(0.0, 0.2)
-
+        # theta = np.random.normal(0.0, 0.2)
+        theta = 0.0
         return disp, theta
 
     def run_from_file(self, file_path):
@@ -140,11 +180,17 @@ class ActionFinderGradient:
         cs0, csR = normalization_pca.compute_normalize_factors(dlo_0)
         dlo_0_n = normalization_pca.normalize_pca(dlo_0, cs0, csR)
         dlo_1_n = normalization_pca.normalize_pca(dlo_1, cs0, csR)
-        action_idx_n = normalization_pca.normalize_min_max(action_idx, 0, self.num_nodes - 1)
-        action_pos_n = normalization_pca.normalize_pca(action_pos, cs0, csR, rotation_only=True)
+        action_idx_n = normalization_pca.normalize_min_max(
+            action_idx, 0, self.num_nodes - 1
+        )
+        action_pos_n = normalization_pca.normalize_pca(
+            action_pos, cs0, csR, rotation_only=True
+        )
         action_theta_n = action_theta
 
-        action_gt_n = np.array([action_idx_n, action_pos_n[0], action_pos_n[1], action_theta_n])
+        action_gt_n = np.array(
+            [action_idx_n, action_pos_n[0], action_pos_n[1], action_theta_n]
+        )
 
         # to tensor
         dlo_0_tn = torch.from_numpy(dlo_0_n.copy()).float().unsqueeze_(0)
@@ -173,7 +219,6 @@ class ActionFinderGradient:
         best_action_n = opt_log[best_loss_idx]["action"]
         best_action_tn = torch.from_numpy(best_action_n).float().unsqueeze_(0)
 
-
         best_action_idx = best_action_n[0]
         best_action_pos = best_action_n[1:3]
         best_action_theta = best_action_n[3]
@@ -187,7 +232,12 @@ class ActionFinderGradient:
         best_action_theta_dn = best_action_theta
 
         best_action = np.array(
-            [best_action_idx_dn, best_action_pos_dn[0], best_action_pos_dn[1], best_action_theta_dn]
+            [
+                best_action_idx_dn,
+                best_action_pos_dn[0],
+                best_action_pos_dn[1],
+                best_action_theta_dn,
+            ]
         )
 
         print("best_action_n", best_action_n)
@@ -204,11 +254,8 @@ class ActionFinderGradient:
         pred_init = self.model(dlo_0_tn, action_init_tn)
         pred_gt = self.model(dlo_0_tn, action_gt_tn)
 
-
         # denormalize everything
-        pred = normalization_pca.denormalize_pca(
-            to_numpy(pred.squeeze()), cs0, csR
-        )
+        pred = normalization_pca.denormalize_pca(to_numpy(pred.squeeze()), cs0, csR)
         pred_init = normalization_pca.denormalize_pca(
             to_numpy(pred_init.squeeze()), cs0, csR
         )
@@ -247,15 +294,14 @@ class ActionFinderGradient:
 
         return output_log
 
-    def run_batch(self, dlo_0, dlo_1, params_real, indices):
-        dlo_0_n, dlo_1_n, _, params_n = self.sample_obj.normalize(
-            dlo_0, dlo_1, np.zeros((4,)), params_real
-        )
+    def run_batch(self, dlo_0, dlo_1, indices):
+        cs0, csR = normalization_pca.compute_normalize_factors(dlo_0)
+        dlo_0_n = normalization_pca.normalize_pca(dlo_0, cs0, csR)
+        dlo_1_n = normalization_pca.normalize_pca(dlo_1, cs0, csR)
 
         # to tensor
         dlo_0_tn = torch.from_numpy(dlo_0_n.copy()).float().unsqueeze_(0)
         dlo_1_tn = torch.from_numpy(dlo_1_n.copy()).float().unsqueeze_(0)
-        params_tn = torch.from_numpy(params_n.copy()).float().unsqueeze_(0)
 
         # init action
 
@@ -263,7 +309,27 @@ class ActionFinderGradient:
         for idx in indices:
             disp, theta = self.sample_init_action_given_idx(dlo_0, dlo_1, idx)
             action_init = np.array([idx, disp[0], disp[1], theta])
-            action_init_n = self.sample_obj.normalize_sample_action(dlo_0, action_init)
+
+            action_init_idx = action_init[0]
+            action_init_pos = action_init[1:3]
+            action_init_theta = action_init[3]
+
+            action_init_idx_n = normalization_pca.normalize_min_max(
+                action_init_idx, 0, self.num_nodes - 1
+            )
+            action_init_pos_n = normalization_pca.normalize_pca(
+                action_init_pos, cs0, csR, rotation_only=True
+            )
+            action_init_theta_n = action_init_theta
+
+            action_init_n = np.array(
+                [
+                    action_init_idx_n,
+                    action_init_pos_n[0],
+                    action_init_pos_n[1],
+                    action_init_theta_n,
+                ]
+            )
             actions_init.append(action_init_n)
 
         actions_init = np.array(actions_init)
@@ -272,11 +338,10 @@ class ActionFinderGradient:
         # ******************************************************************************************
         dlo_0_tn_batch = dlo_0_tn.tile(len(indices), 1, 1)
         dlo_1_tn_batch = dlo_1_tn.tile(len(indices), 1, 1)
-        params_tn_batch = params_tn.tile(len(indices), 1)
 
         # find action
         opt_log = self.find_action_batch(
-            dlo_0_tn_batch, dlo_1_tn_batch, action_init_tn, params_tn_batch
+            dlo_0_tn_batch, dlo_1_tn_batch, action_init_tn
         )
 
         # ******************************************************************************************
@@ -291,9 +356,28 @@ class ActionFinderGradient:
             best_loss = opt_log_losses[best_loss_idx]
 
             best_action_n = opt_log[best_loss_idx]["action"][i]
-            best_action = self.sample_obj.denormalize_sample_action(
-                dlo_0_n, best_action_n
+            
+            best_action_idx = best_action_n[0]
+            best_action_pos = best_action_n[1:3]
+            best_action_theta = best_action_n[3]
+
+            best_action_idx_dn = normalization_pca.denormalize_min_max(
+                best_action_idx, 0, self.num_nodes - 1
             )
+            best_action_pos_dn = normalization_pca.denormalize_pca(
+                best_action_pos, cs0, csR, rotation_only=True
+            )
+            best_action_theta_dn = best_action_theta
+
+            best_action = np.array(
+                [
+                    best_action_idx_dn,
+                    best_action_pos_dn[0],
+                    best_action_pos_dn[1],
+                    best_action_theta_dn,
+                ]
+            )
+
             print("best action {i} - {action}".format(i=i, action=best_action))
             best_action_tn = torch.from_numpy(best_action_n).float()
 
@@ -301,17 +385,19 @@ class ActionFinderGradient:
             pred = self.model(
                 dlo_0_tn_batch[i].unsqueeze(0),
                 best_action_tn.unsqueeze(0),
-                params_tn_batch[i].unsqueeze(0),
             )
             pred_init = self.model(
                 dlo_0_tn_batch[i].unsqueeze(0),
                 action_init_tn[i].unsqueeze(0),
-                params_tn_batch[i].unsqueeze(0),
             )
 
             # denormalize everything
-            pred = self.sample_obj.denormalize_dlo(to_numpy(pred.squeeze()))
-            pred_init = self.sample_obj.denormalize_dlo(to_numpy(pred_init.squeeze()))
+            pred = normalization_pca.denormalize_pca(
+                to_numpy(pred.squeeze()), cs0, csR
+            )
+            pred_init = normalization_pca.denormalize_pca(
+                to_numpy(pred_init.squeeze()), cs0, csR
+            )
 
             # loss
             loss_action_init = self.loss_fcn(
@@ -362,7 +448,7 @@ class ActionFinderGradient:
             optimizer.zero_grad()
 
             # trainable_params2 = tanh(trainable_params)
-            trainable_params2 = trainable_params 
+            trainable_params2 = trainable_params
 
             action_tn = torch.cat([idx.unsqueeze(0), trainable_params2], dim=1)
             pred = self.model(dlo_0, action_tn)
@@ -392,7 +478,7 @@ class ActionFinderGradient:
 
         return opt_log_dict
 
-    def find_action_batch(self, dlos_0, dlos_1, actions, params, print_every=10):
+    def find_action_batch(self, dlos_0, dlos_1, actions, print_every=10):
         indices = actions[:, 0].unsqueeze(1)
 
         trainable_params = torch.nn.Parameter(
@@ -411,7 +497,7 @@ class ActionFinderGradient:
 
             actions_tn = torch.cat([indices, tanh(trainable_params)], dim=1)
 
-            pred = self.model(dlos_0, actions_tn, params)
+            pred = self.model(dlos_0, actions_tn)
 
             loss = self.loss_fcn(pred, dlos_1)
 
@@ -440,17 +526,17 @@ class ActionFinderGradient:
     def plot_log(self, log_dict):
         opt_log = log_dict["opt_log"]
         pred = log_dict["pred"]
-        pred_init = log_dict["pred_init"]
-        pred_gt = log_dict["pred_gt"]
-        pred_gt = log_dict["pred_gt"]
+        # pred_init = log_dict["pred_init"]
+        # pred_gt = log_dict["pred_gt"]
         dlo_0 = log_dict["dlo_0"]
         dlo_1 = log_dict["dlo_1"]
 
-        loss_gt = log_dict["loss_action_gt"]
-        loss_init = log_dict["loss_action_init"]
-        gt_action_normalized = log_dict["gt_action_normalized"]
-        init_action_normalized = log_dict["init_action_normalized"]
+        # loss_gt = log_dict["loss_action_gt"]
+        # loss_init = log_dict["loss_action_init"]
+        # gt_action_normalized = log_dict["gt_action_normalized"]
+        # init_action_normalized = log_dict["init_action_normalized"]
         best_action = log_dict["best_action"]
+        true_action = log_dict["true_action"]
 
         x_axis = np.array(list(opt_log.keys()))
 
@@ -467,12 +553,12 @@ class ActionFinderGradient:
         best_theta = action_theta_list[best_loss_idx]
 
         # ACTION GT
-        gt_x_list = gt_action_normalized[1] * np.ones_like(x_axis)
-        gt_y_list = gt_action_normalized[2] * np.ones_like(x_axis)
-        gt_theta_list = gt_action_normalized[3] * np.ones_like(x_axis)
-        init_x_list = init_action_normalized[1] * np.ones_like(x_axis)
-        init_y_list = init_action_normalized[2] * np.ones_like(x_axis)
-        init_theta_list = init_action_normalized[3] * np.ones_like(x_axis)
+        # gt_x_list = gt_action_normalized[1] * np.ones_like(x_axis)
+        # gt_y_list = gt_action_normalized[2] * np.ones_like(x_axis)
+        # gt_theta_list = gt_action_normalized[3] * np.ones_like(x_axis)
+        # init_x_list = init_action_normalized[1] * np.ones_like(x_axis)
+        # init_y_list = init_action_normalized[2] * np.ones_like(x_axis)
+        # init_theta_list = init_action_normalized[3] * np.ones_like(x_axis)
 
         # EDGE ACTION
         # idx = int(best_action[0])
@@ -504,9 +590,32 @@ class ActionFinderGradient:
             fc="red",
             ec="red",
             length_includes_head=True,
-            label="best_action"
+            label="best_action",
         )
-        plt.scatter(end_pos[0], end_pos[1], marker="*", s=120, color="red", label="action_end")
+        plt.scatter(
+            end_pos[0], end_pos[1], marker="*", s=120, color="red", label="action_end"
+        )
+
+        # Plot the true action as an arrow
+        idx = int(true_action[0])
+        true_start_pos = dlo_0[idx, :2]
+        true_end_pos = true_start_pos + true_action[1:3]
+        plt.arrow(
+            true_start_pos[0],
+            true_start_pos[1],
+            true_action[1],
+            true_action[2],
+            head_width=0.005,
+            head_length=0.01,
+            fc="green",
+            ec="green",
+            length_includes_head=True,
+            label="true_action",
+        )
+        plt.scatter(
+            true_end_pos[0], true_end_pos[1], marker="*", s=120, color="green", label="true_action_end"
+        )
+
 
         plt.scatter(dlo_0[0, 0], dlo_0[0, 1], marker="X", s=100)
         plt.scatter(dlo_1[0, 0], dlo_1[0, 1], marker="X", s=100)
@@ -517,38 +626,76 @@ class ActionFinderGradient:
 
         fig, axs = plt.subplots(1, 4, figsize=(15, 6))
         axs[0].plot(x_axis, action_x_list, label=f"trained ({best_x:.2f})")
-        axs[0].plot(x_axis, gt_x_list, label="gt")
-        axs[0].plot(x_axis, init_x_list, label="init")
+        # axs[0].plot(x_axis, gt_x_list, label="gt")
+        # axs[0].plot(x_axis, init_x_list, label="init")
         axs[0].legend()
         axs[0].set_ylim([-1, 1])
         axs[0].set_title("disp_x")
 
         axs[1].plot(x_axis, action_y_list, label=f"trained ({best_y:.2f})")
-        axs[1].plot(x_axis, gt_y_list, label="gt")
-        axs[1].plot(x_axis, init_y_list, label="init")
+        # axs[1].plot(x_axis, gt_y_list, label="gt")
+        # axs[1].plot(x_axis, init_y_list, label="init")
         axs[1].legend()
         axs[1].set_ylim([-1, 1])
         axs[1].set_title("disp_y")
 
         axs[2].plot(x_axis, action_theta_list, label=f"trained ({best_theta:.2f})")
-        axs[2].plot(x_axis, gt_theta_list, label="gt")
-        axs[2].plot(x_axis, init_theta_list, label="init")
+        # axs[2].plot(x_axis, gt_theta_list, label="gt")
+        # axs[2].plot(x_axis, init_theta_list, label="init")
         axs[2].legend()
         axs[2].set_ylim([-1, 1])
         axs[2].set_title("theta")
 
         axs[3].plot(x_axis, loss_list)
-        axs[3].plot(x_axis, loss_gt * np.ones_like(x_axis), label="gt")
-        axs[3].plot(x_axis, loss_init * np.ones_like(x_axis), label="init")
+        # axs[3].plot(x_axis, loss_gt * np.ones_like(x_axis), label="gt")
+        # axs[3].plot(x_axis, loss_init * np.ones_like(x_axis), label="init")
         axs[3].set_title("loss")
         axs[3].legend()
 
         plt.tight_layout()
         plt.show()
 
+def extract_shapes(dataset_path):
+    init_shapes = []
+    final_shapes = []
+    actions = []
+    with open(dataset_path, 'r') as f:
+        is_first_obs_of_episode = True
+        for line in f:
+            try:
+                data = json.loads(line.strip())
+                if data.get("type") == "data":
+                    if is_first_obs_of_episode:
+                        init_shapes.append(np.array(data["obs_dlo"]))
+                        final_shapes.append(np.array(data["obs_target"]))
+                        actions.append(np.array(data["action_from_grasp_to_release"]))
+                        is_first_obs_of_episode = False
+                    else:
+                        continue
+
+                elif data.get("type") == "episode_end":
+                    is_first_obs_of_episode = True
+
+            except json.JSONDecodeError as e:
+                print(f"Warning: Skipping invalid JSON line: {e}")
+                continue
+
+
+    # Convert to numpy arrays
+    init_shapes = np.array(init_shapes, dtype=np.float32)
+    final_shapes = np.array(final_shapes, dtype=np.float32)
+    actions = np.array(actions, dtype=np.float32)
+
+    return {
+        "init": init_shapes,
+        "target": final_shapes,
+        "action": actions,
+    }
+
 
 if __name__ == "__main__":
-    checkpoint_path = "/home/mengo/Research/LLM_DOM/diffusion_mk2/weights/shape_prediction_final_model.pt"
+    dataset_path = "/home/mengo/Research/LLM_DOM/diffusion_mk2/json_data/test.jsonl"
+    checkpoint_path = "/home/mengo/Research/LLM_DOM/diffusion_mk2/weights/chkp_90000.pt"
     action_finder = ActionFinderGradient(
         checkpoint_path=checkpoint_path,
         device="cuda" if torch.cuda.is_available() else "cpu",
@@ -556,13 +703,21 @@ if __name__ == "__main__":
         num_steps=5000,
         verbose=True,
     )
+    data = extract_shapes(dataset_path)
+    for init, target, action in zip(data["init"], data["target"], data["action"]):
 
-    log = action_finder.run(
-        dlo_0=np.array(INITIAL_SHAPE)[:, :2],
-        dlo_1=np.array(TARGET_SHAPE)[:, :2],
-        idx=13,
-    )
+        log = action_finder.run(
+            dlo_0=init[:, :2],
+            dlo_1=target[:, :2],
+            idx=action[0],
+        )
+        log["true_action"] = action
 
-    action_finder.plot_log(log)
+        # indices = list(range(len(INITIAL_SHAPE)))
+        # log = action_finder.run_batch(
+        #     dlo_0=np.array(INITIAL_SHAPE)[:, :2],
+        #     dlo_1=np.array(TARGET_SHAPE)[:, :2],
+        #     indices=indices,
+        # )
 
-
+        action_finder.plot_log(log)
