@@ -14,14 +14,14 @@ np.set_printoptions(precision=4,    # number of decimal places
 
 PROJECT_DIR = os.path.dirname(__file__)
 LOG_INTERVAL = 50
-CHECKPOINT_INTERVAL = 30000
+CHECKPOINT_INTERVAL = 10000
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 config = dict(
     batch_size=1000,
     epochs=300000,
-    lr=5e-4,
-    hidden_dim=256,
+    lr=1e-3,
+    hidden_dim=512,
     dim_points=2,
     num_points=15,
     dataset_path=os.path.join(PROJECT_DIR, "zarr_data", "shape_prediction.zarr.zip"),
@@ -38,6 +38,9 @@ print("*" * 20)
 
 # DATASETS
 train_data = DloDataset(config["dataset_path"], num_points=config["num_points"])
+stats = train_data.stats
+
+print(stats)
 
 train_loader = torch.utils.data.DataLoader(train_data, batch_size=config["batch_size"], shuffle=True, num_workers=0)
 
@@ -88,6 +91,7 @@ with tqdm(range(config["epochs"]), desc="Epoch") as epoch_bar:
             checkpoint_path = os.path.join(PROJECT_DIR, "checkpoints", "shape_prediction", f"chkp_{epoch}.pt")
             state = dict(config)
             state["model"] = model.state_dict()
+            state["stats"] = stats
             torch.save(state, checkpoint_path)
             print(f"Saved checkpoint at {checkpoint_path}")
 
@@ -98,5 +102,6 @@ with tqdm(range(config["epochs"]), desc="Epoch") as epoch_bar:
 model_path = os.path.join(PROJECT_DIR, "checkpoints", "shape_prediction", "final_model.pt")
 state = dict(config)
 state["model"] = model.state_dict()
+state["stats"] = stats
 torch.save(state, model_path)
 print(f"Final model saved at {model_path}")

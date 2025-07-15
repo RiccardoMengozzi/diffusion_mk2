@@ -48,7 +48,7 @@ def plot_sample(ax, dlo_0, dlo_1, action, denormalize_idx=False, dataset=None, t
 
 
 if __name__ == "__main__":
-    dataset_path = "/home/mengo/Research/LLM_DOM/diffusion_mk2/zarr_data/shape_prediction.zarr.zip"
+    dataset_path = "/home/lar/Riccardo/diffusion_mk2/zarr_data/shape_prediction.zarr.zip"
     dataset_root = zarr.open(dataset_path, 'r')
     initial_shapes = dataset_root['data']['initial_shape'][:].reshape(-1, 15, 3)
     final_shapes = dataset_root['data']['final_shape'][:].reshape(-1, 15, 3)
