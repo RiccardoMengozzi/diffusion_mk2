@@ -3,11 +3,17 @@ import matplotlib.pyplot as plt
 import numpy as np
 from diffusion_mk2.model import normalization_pca
 from diffusion_mk2.dataset.shape_prediction_dataset import DloDataset
+import torch
+import os
+from tqdm import tqdm
 
 np.set_printoptions(precision=4,    # number of decimal places
                     suppress=True,  # suppress scientific notation
                     linewidth=100,  # characters per line
                     threshold=1000) # controls summarization of large arrays
+
+
+PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 def plot_sample(ax, dlo_0, dlo_1, action, denormalize_idx=False, dataset=None, title=None):
     if not denormalize_idx:
@@ -47,54 +53,80 @@ def plot_sample(ax, dlo_0, dlo_1, action, denormalize_idx=False, dataset=None, t
     ax.axis("equal")
 
 
+def extract_all_states(dataset_path, dataset):
+    """Extract full sequences of original and processed DLO and EE states."""
+    root = zarr.open(dataset_path, mode="r")
+    inits = root["data"]["initial_shape"][:].reshape(-1, dataset.num_points, 3)
+    targets = root["data"]["final_shape"][:].reshape(-1, dataset.num_points, 3)
+    actions = root["data"]["action"][:]
+
+    inits = inits[:, :, :2]
+    targets = targets[:, :, :2]
+
+    normalized_data = np.array(dataset.normalized_train_data)
+    proc_inits = np.array(list(map(lambda d: d.get("initial_shape"), normalized_data)))
+    proc_targets = np.array(list(map(lambda d: d.get("final_shape"), normalized_data)))
+    proc_actions = np.array(list(map(lambda d: d.get("action"), normalized_data)))
+
+    return inits, targets, actions, proc_inits, proc_targets, proc_actions
+
+def load_dataset(dataset_path, num_points):
+    """Load and return dataset and dataloader."""
+    dataset = DloDataset(
+        dataset_path=dataset_path,
+        num_points=num_points,
+    )
+
+    dataloader = torch.utils.data.DataLoader(
+        dataset,
+        batch_size=1,
+        num_workers=12,
+        shuffle=False,
+        pin_memory=True,
+        persistent_workers=True,
+    )
+    return dataset, dataloader
+
+
 if __name__ == "__main__":
-    dataset_path = "/home/lar/Riccardo/diffusion_mk2/zarr_data/shape_prediction.zarr.zip"
-    dataset_root = zarr.open(dataset_path, 'r')
-    initial_shapes = dataset_root['data']['initial_shape'][:].reshape(-1, 15, 3)
-    final_shapes = dataset_root['data']['final_shape'][:].reshape(-1, 15, 3)
-    actions = dataset_root['data']['action'][:]
+    dataset_path = "/home/mengo/Research/LLM_DOM/diffusion_mk2/zarr_data/shape_prediction_simplified.zarr.zip"
+    
+    dataset, dataloader = load_dataset(
+        dataset_path=dataset_path,
+        num_points=15,
+    )
 
-    dataset = DloDataset(dataset_path, num_points=15)
+    inits, targets, actions, inits_n, targets_n, actions_n = extract_all_states(
+        dataset_path, dataset
+    )
+    print("action_n shape:", actions_n.shape)
 
-    actions_idx = actions[:, 0]
-    actions_pos = actions[:, 1:3]  # Assuming the first 3 columns are the action positions
-    actions_theta = actions[:, 3]
+    actions_n_idx = actions_n[:, 0]
+    actions_n_pos = actions_n[:, 1:3]  # Assuming the first 3 columns are the action positions
+    actions_n_theta = actions_n[:, 3]
 
-    initial_shapes = initial_shapes[:, :, :2]  # Use only the first two dimensions for plotting
-    final_shapes = final_shapes[:, :, :2]  # Use only the first two dimensions
-
-
-    for dlo_0, dlo_1, action_idx, action_pos, action_theta in zip(initial_shapes, 
-                                                                  final_shapes, 
-                                                                  actions_idx,
-                                                                  actions_pos,
-                                                                  actions_theta):
-        
+    for i, (dlo_0, dlo_1, action, dlo_0_n, dlo_1_n, action_n_idx, action_n_pos, action_n_theta) in enumerate(zip(inits,
+                                                                                                  targets,
+                                                                                                  actions,
+                                                                                                  inits_n, 
+                                                                                                  targets_n, 
+                                                                                                  actions_n_idx,
+                                                                                                  actions_n_pos,
+                                                                                                  actions_n_theta)):
         cs0, csR = normalization_pca.compute_normalize_factors(dlo_0)
-        dlo_0_n = normalization_pca.normalize_pca(dlo_0, cs0, csR)
-        dlo_1_n = normalization_pca.normalize_pca(dlo_1, cs0, csR)
-        action_idx_n = normalization_pca.normalize_min_max(action_idx, 
-                                                           dataset.stats["action"]["min"][0],
-                                                           dataset.stats["action"]["max"][0])
-        action_pos_n = normalization_pca.normalize_pca(action_pos, cs0, csR, rotation_only=True)
-        action_theta_n = normalization_pca.normalize_min_max(action_theta,
-                                                           dataset.stats["action"]["min"][-1],
-                                                           dataset.stats["action"]["max"][-1]) 
-
-
+        print("dlo_0_n shape:", dlo_0_n.shape)
         dlo_0_dn = normalization_pca.denormalize_pca(dlo_0_n, cs0, csR)
         dlo_1_dn = normalization_pca.denormalize_pca(dlo_1_n, cs0, csR)
-        action_idx_dn = normalization_pca.denormalize_min_max(action_idx_n, 
+        action_dn_idx = normalization_pca.denormalize_min_max(action_n_idx, 
                                                      dataset.stats["action"]["min"][0],
                                                      dataset.stats["action"]["max"][0])
-        action_pos_dn = normalization_pca.denormalize_pca(action_pos_n, cs0, csR, rotation_only=True)
-        action_theta_dn = normalization_pca.denormalize_min_max(action_theta_n,
+        action_dn_pos = normalization_pca.denormalize_pca(action_n_pos, cs0, csR, rotation_only=True)
+        action_dn_theta = normalization_pca.denormalize_min_max(action_n_theta,
                                                                 dataset.stats["action"]["min"][-1],
                                                                 dataset.stats["action"]["max"][-1])
         
-        action = np.array([action_idx, action_pos[0], action_pos[1], action_theta])
-        action_n = np.array([action_idx_n, action_pos_n[0], action_pos_n[1], action_theta_n])
-        action_dn = np.array([action_idx_dn, action_pos_dn[0], action_pos_dn[1], action_theta_dn])
+        action_n = np.array([action_n_idx, action_n_pos[0], action_n_pos[1], action_n_theta])
+        action_dn = np.array([action_dn_idx, action_dn_pos[0], action_dn_pos[1], action_dn_theta])
 
 
         # Print diagnostics
@@ -104,9 +136,9 @@ if __name__ == "__main__":
 
         # Visualization
         fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(20, 6))
-        plot_sample(ax1, dlo_0, dlo_1, action, title="Original")
-        plot_sample(ax2, dlo_0_n, dlo_1_n, action_n, denormalize_idx=True, dataset=dataset, title="Normalized")
-        plot_sample(ax3, dlo_0_dn, dlo_1_dn, action_dn, title="Denormalized")
+        plot_sample(ax1, dlo_0, dlo_1, action, title=f"Original_{i}")
+        plot_sample(ax2, dlo_0_n, dlo_1_n, action_n, denormalize_idx=True, dataset=dataset, title=f"Normalized_{i}")
+        plot_sample(ax3, dlo_0_dn, dlo_1_dn, action_dn, title=f"Denormalized_{i}")
         plt.tight_layout()
         plt.show()
 

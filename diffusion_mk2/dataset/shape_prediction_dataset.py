@@ -69,7 +69,7 @@ class DloDataset(Dataset):
             action_pos_n = normalization_pca.normalize_pca(action_pos, cs0, csR, rotation_only=True)
             action_theta_n = normalization_pca.normalize_min_max(action_theta, self.stats["action"]["min"][-1], self.stats["action"]["max"][-1])
 
-            action_n = np.array([action_idx_n, action_pos_n[0], action_pos[1], action_theta_n])
+            action_n = np.array([action_idx_n, action_pos_n[0], action_pos_n[1], action_theta_n])
             normalized_samples.append({
                 "initial_shape": np.array(init_shape_n),
                 "final_shape": np.array(final_shape_n),
