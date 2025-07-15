@@ -8,7 +8,7 @@ import json
 # ------------------------------------------------------------
 
 project_dir   = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-filename  = os.path.join(project_dir, "json_data", "combined_dataset_cleaned.jsonl")
+filename  = os.path.join(project_dir, "json_data", "combined_dataset.jsonl")
 zarr_filename = os.path.join(project_dir, "zarr_data/shape_prediction.zarr.zip")
 
 # ------------------------------------------------------------

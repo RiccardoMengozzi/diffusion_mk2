@@ -18,7 +18,7 @@ CHECKPOINT_INTERVAL = 30000
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 config = dict(
-    batch_size=100,
+    batch_size=1000,
     epochs=300000,
     lr=5e-4,
     hidden_dim=256,
