@@ -144,15 +144,11 @@ class ShapingDataset(torch.utils.data.Dataset):
         #     stats[key] = get_data_stats(data)
         #     normalized_train_data[key] = normalize_data(data, stats[key])
 
-        self.initial_shapes_processor = None
-        self.final_shapes_processor = None
-        self.ee_states_processor = None
-        self.actions_processor = None
-
         self.indices = indices
         self.pred_horizon = pred_horizon
         self.action_horizon = action_horizon
         self.obs_horizon = obs_horizon
+
 
 
         self.stats = self.get_data_stats(train_data)
@@ -186,7 +182,6 @@ class ShapingDataset(torch.utils.data.Dataset):
 
         dlo_states = dlo_states.reshape(-1, self.obs_dlo_dim // 3, 3)
         target_shapes = target_shapes.reshape(-1, self.obs_target_dim // 3, 3)
-
         ee_states_pos = ee_states[:, :3]  # [x, y, z]
         ee_states_theta = ee_states[:, 3]  # [theta]
         ee_states_gripper = ee_states[:, 4]  # [gripper
