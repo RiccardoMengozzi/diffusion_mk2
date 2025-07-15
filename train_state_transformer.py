@@ -34,7 +34,7 @@ hyperparameters = {
     "device": torch.device("cuda"),  # Will default to CUDA if available
     "model_save_path": "",
     "checkpoint_save_interval": 10,  # Save checkpoint every N epochs
-    "dataset_path": os.path.join(PROJECT_DIR, "zarr_data", "dataset.zarr.zip"),
+    "dataset_path": os.path.join(PROJECT_DIR, "zarr_data", "dataset_cleaned_short.zarr.zip"),
 
     # Transformer specific parameters
     "n_layer": 12,

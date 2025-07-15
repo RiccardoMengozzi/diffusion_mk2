@@ -14,7 +14,7 @@ from diffusers import get_scheduler
 from diffusers.schedulers import DDPMScheduler
 
 from diffusion_mk2.model.diffusion.conditional_unet_1d import ConditionalUnet1D
-from diffusion_mk2.dataset.shaping_dataset import PushTStateDataset
+from diffusion_mk2.dataset.shaping_dataset import ShapingDataset
 
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -75,7 +75,7 @@ class DiffusionTrainer:
 
 
         # Build dataset and dataloader
-        self.dataset = PushTStateDataset(
+        self.dataset = ShapingDataset(
             dataset_path=self.DATASET_PATH,
             pred_horizon=self.PRED_HORIZON,
             obs_horizon=self.OBS_HORIZON,

@@ -18,7 +18,7 @@ CHECKPOINT_INTERVAL = 30000
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 config = dict(
-    batch_size=256,
+    batch_size=100,
     epochs=300000,
     lr=5e-4,
     hidden_dim=256,
@@ -62,19 +62,23 @@ with tqdm(range(config["epochs"]), desc="Epoch") as epoch_bar:
         ##############################
         # TRAIN
         model.train()
-        for i, data in enumerate(train_loader):
-            optimizer.zero_grad()
+        with tqdm(range(len(train_loader)), desc="Iterations", leave=False) as iteration_bar:
+            for i, data in enumerate(train_loader):
+                optimizer.zero_grad()
 
-            dlo_0, dlo_1, action = data
-            dlo_0, dlo_1, action = dlo_0.to(DEVICE), dlo_1.to(DEVICE), action.to(DEVICE)
+                dlo_0, dlo_1, action = data["initial_shape"], data["final_shape"], data["action"]
+                dlo_0 = dlo_0.clone().detach().float()
+                dlo_1 = dlo_1.clone().detach().float()
+                action = action.clone().detach().float()
+                dlo_0, dlo_1, action = dlo_0.to(DEVICE), dlo_1.to(DEVICE), action.to(DEVICE)
 
-            pred = model(dlo_0, action)
+                pred = model(dlo_0, action)
 
-            loss = loss_fcn(pred, dlo_1)
-            loss.backward()
-            optimizer.step()
-            train_epoch_loss += loss.item()
-            global_step += 1
+                loss = loss_fcn(pred, dlo_1)
+                loss.backward()
+                optimizer.step()
+                train_epoch_loss += loss.item()
+                global_step += 1
 
         train_epoch_loss /= len(train_loader)
         
