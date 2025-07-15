@@ -2,6 +2,7 @@
 wandb/
 json_data/
 zarr_data/
+weights/
 *.pt
 *.pyc
 *.egg-info
