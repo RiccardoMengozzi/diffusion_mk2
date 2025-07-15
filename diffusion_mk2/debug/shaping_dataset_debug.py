@@ -2,6 +2,7 @@ import zarr
 import torch
 import numpy as np
 import math
+import os
 from torch.utils.data import Subset
 from tqdm import tqdm
 import matplotlib.pyplot as plt
@@ -195,7 +196,7 @@ def plot_animated_comparison(
             ax.set_zlim(z_min, z_max)
 
             # Vista top‑down: elevazione 90°, rotazione orizzontale  -90° (opzionale)
-            # ax.view_init(elev=90, azim=-90)
+            ax.view_init(elev=90, azim=-90)
 
         plt.tight_layout()
         plt.pause(interval)
@@ -205,7 +206,9 @@ def plot_animated_comparison(
 
 def main():
     # Configuration
-    dataset_path = "/home/lar/Riccardo/diffusion_mk2/zarr_data/dataset_short.zarr.zip"
+    project_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    dataset_path = os.path.join(project_dir, "zarr_data", "combined_dataset_simplified.zarr.zip")
+    
     obs_ee_dim = 5  # [x, y, z, θ, grip]
     obs_shape_dim = 45  # 15 points * 3
     obs_target_dim = 45

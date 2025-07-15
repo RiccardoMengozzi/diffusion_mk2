@@ -40,7 +40,7 @@ hyperparameters = {
     # wandb
     "project_name": "diffusion_model",
     "entity": "riccardo_mengozzi",
-    "wandb_mode": "disabled",  # Change to "online" to enable logging
+    "wandb_mode": "online",  # Change to "online" to enable logging
 }
 
 
@@ -311,8 +311,6 @@ class DiffusionTrainer:
         )  # shape: (B, ACTION_HORIZON, ACTION_DIM)
         batch_size = obs.shape[0]
 
-        print("obs_shape:", obs.shape)
-        print("actions_shape:", actions.shape)
 
         #### SIMPLIFY #####
         # Keep only x, y, theta for ee_state and action
@@ -349,8 +347,6 @@ class DiffusionTrainer:
         )  # Concatenate simplified states
         actions = actions[:, :, [0, 1, 3]]  # Keep x, y, theta
 
-        print("obs_shape after simplification:", obs.shape)
-        print("actions_shape after simplification:", actions.shape)
 
         # Flatten observation for FiLM conditioning
         obs_cond = obs[:, : self.OBS_HORIZON, :].flatten(
