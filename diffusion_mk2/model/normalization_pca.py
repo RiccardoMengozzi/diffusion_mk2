@@ -82,13 +82,13 @@ def compute_pca_coordinate_system(dlo_centered):
     csR = eigvec[:, sorted_indices].T
     
     # Anti-flip adjustments
-    if np.linalg.det(csR) < 0:
-        csR[-1, :] *= -1
+    # if np.linalg.det(csR) < 0:
+    #     csR[-1, :] *= -1
     
-    for i in range(csR.shape[0]):
-        j = np.argmax(np.abs(csR[i, :]))
-        if csR[i, j] < 0:
-            csR[i, :] *= -1
+    # for i in range(csR.shape[0]):
+    #     j = np.argmax(np.abs(csR[i, :]))
+    #     if csR[i, j] < 0:
+    #         csR[i, :] *= -1
     
     return csR
 
@@ -102,13 +102,15 @@ def compute_normalize_factors(dlo):
     dlo_range = np.max(dlo, axis=0) - np.min(dlo, axis=0)
     is_linear = is_dlo_linear(dlo_centered, dlo_range)
     
-    if is_linear:
-        # For linear DLO, use the DLO's main axis as primary axis
-        csR = compute_linear_coordinate_system(dlo_centered)
-    else:
-        # For non-linear DLO, use PCA
-        csR = compute_pca_coordinate_system(dlo_centered)
-    
+    # if is_linear:
+    #     # For linear DLO, use the DLO's main axis as primary axis
+    #     csR = compute_linear_coordinate_system(dlo_centered)
+    # else:
+    #     # For non-linear DLO, use PCA
+    #     csR = compute_pca_coordinate_system(dlo_centered)
+    csR = compute_pca_coordinate_system(dlo_centered)
+
+
     return cs0, csR
 
 
@@ -130,7 +132,7 @@ def denormalize_pca(data_n, cs0, csR, rotation_only=False):
         return data
     
     data = (csR.T @ data_n.T).T + cs0
-    return data
+    return data.squeeze()
 
 def denormalize_pca_batch(data_n, cs0, csR, rotation_only=False):
     data = []

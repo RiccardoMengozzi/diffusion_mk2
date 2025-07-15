@@ -204,42 +204,16 @@ class ActionFinderGradient:
         pred_init = self.model(dlo_0_tn, action_init_tn)
         pred_gt = self.model(dlo_0_tn, action_gt_tn)
 
+
         # denormalize everything
-        pred_idx = pred[0]
-        pred_init_idx = pred_init[0]
-        pred_gt_idx = pred_gt[0]
-
-        pred_pos = pred[1:3]
-        pred_init_pos = pred_init[1:3]
-        pred_gt_pos = pred_gt[1:3]
-
-        pred_theta = pred[3]
-        pred_init_theta = pred_init[3]
-        pred_gt_theta = pred_gt[3]
-
-        pred_idx_dn = normalization_pca.denormalize_min_max(pred_idx[0], 0, self.num_nodes - 1)
-        pred_pos_dn = normalization_pca.denormalize_pca(pred_pos, cs0, csR, rotation_only=True)
-        pred_theta_dn = pred_theta
-
-        pred_init_idx_dn = normalization_pca.denormalize_min_max(pred_init_idx[0], 0, self.num_nodes - 1)
-        pred_init_pos_dn = normalization_pca.denormalize_pca(pred_init_pos, cs0, csR, rotation_only=True)
-        pred_init_theta_dn = pred_init_theta
-
-        pred_gt_idx_dn = normalization_pca.denormalize_min_max(pred_gt_idx[0], 0, self.num_nodes - 1)
-        pred_gt_pos_dn = normalization_pca.denormalize_pca(pred_gt_pos, cs0, csR, rotation_only=True)
-        pred_gt_theta_dn = pred_gt_theta
-
-        pred = np.array([pred_idx_dn, pred_pos_dn[0], pred_pos_dn[1], pred_theta_dn])
-        pred_init = np.array(
-            [
-                pred_init_idx_dn,
-                pred_init_pos_dn[0],
-                pred_init_pos_dn[1],
-                pred_init_theta_dn,
-            ]
+        pred = normalization_pca.denormalize_pca(
+            to_numpy(pred.squeeze()), cs0, csR
         )
-        pred_gt = np.array(
-            [pred_gt_idx_dn, pred_gt_pos_dn[0], pred_gt_pos_dn[1], pred_gt_theta_dn]
+        pred_init = normalization_pca.denormalize_pca(
+            to_numpy(pred_init.squeeze()), cs0, csR
+        )
+        pred_gt = normalization_pca.denormalize_pca(
+            to_numpy(pred_gt.squeeze()), cs0, csR
         )
 
         # loss
@@ -387,7 +361,8 @@ class ActionFinderGradient:
         for step in range(self.num_steps):
             optimizer.zero_grad()
 
-            trainable_params2 = tanh(trainable_params)
+            # trainable_params2 = tanh(trainable_params)
+            trainable_params2 = trainable_params 
 
             action_tn = torch.cat([idx.unsqueeze(0), trainable_params2], dim=1)
             pred = self.model(dlo_0, action_tn)
@@ -500,21 +475,38 @@ class ActionFinderGradient:
         init_theta_list = init_action_normalized[3] * np.ones_like(x_axis)
 
         # EDGE ACTION
-        idx = int(best_action[0])
-        target_pos = self.sample_obj.compute_edge_target_position(
-            dlo_0, idx, best_action[1], best_action[2], best_action[3]
-        )
-        target_pos = np.array(target_pos)
+        # idx = int(best_action[0])
+        # target_pos = self.sample_obj.compute_edge_target_position(
+        #     dlo_0, idx, best_action[1], best_action[2], best_action[3]
+        # )
+        # target_pos = np.array(target_pos)
 
         fig = plt.figure(figsize=(10, 6))
         plt.plot(dlo_0[:, 0], dlo_0[:, 1], "o-", label="dlo_0")
         plt.plot(dlo_1[:, 0], dlo_1[:, 1], "v-", label="dlo_1", zorder=100)
-        plt.plot(pred_gt[:, 0], pred_gt[:, 1], "o-", label="pred_gt")
-        plt.plot(pred_init[:, 0], pred_init[:, 1], "o-", label="pred_init")
+        # plt.plot(pred_gt[:, 0], pred_gt[:, 1], "o-", label="pred_gt")
+        # plt.plot(pred_init[:, 0], pred_init[:, 1], "o-", label="pred_init")
         plt.plot(pred[:, 0], pred[:, 1], "o-", label="pred")
-        plt.plot(
-            target_pos[:, 0], target_pos[:, 1], "o-", label="target_pos", color="cyan"
+        # plt.plot(
+        #     target_pos[:, 0], target_pos[:, 1], "o-", label="target_pos", color="cyan"
+        # )
+        # Plot the best action as an arrow
+        idx = int(best_action[0])
+        start_pos = dlo_0[idx, :2]
+        end_pos = start_pos + best_action[1:3]
+        plt.arrow(
+            start_pos[0],
+            start_pos[1],
+            best_action[1],
+            best_action[2],
+            head_width=0.005,
+            head_length=0.01,
+            fc="red",
+            ec="red",
+            length_includes_head=True,
+            label="best_action"
         )
+        plt.scatter(end_pos[0], end_pos[1], marker="*", s=120, color="red", label="action_end")
 
         plt.scatter(dlo_0[0, 0], dlo_0[0, 1], marker="X", s=100)
         plt.scatter(dlo_1[0, 0], dlo_1[0, 1], marker="X", s=100)
@@ -565,10 +557,12 @@ if __name__ == "__main__":
         verbose=True,
     )
 
-    action_finder.run(
+    log = action_finder.run(
         dlo_0=np.array(INITIAL_SHAPE)[:, :2],
         dlo_1=np.array(TARGET_SHAPE)[:, :2],
-        idx=7,
+        idx=13,
     )
+
+    action_finder.plot_log(log)
 
 
