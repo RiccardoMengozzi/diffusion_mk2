@@ -4,8 +4,8 @@ import json
 import numpy as np
 
 project_dir   = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-filename  = os.path.join(project_dir, "json_data", "test.jsonl")
-output = os.path.join(project_dir, "json_data", "test_simplified.jsonl")
+filename  = os.path.join(project_dir, "json_data", "combined_dataset.jsonl")
+output = os.path.join(project_dir, "json_data", "combined_dataset_simplified.jsonl")
 
 is_first_obs_of_episode = True
 current_z_state = 0.0
@@ -25,7 +25,7 @@ with open(filename, 'r') as f:
                 else:
                     delta_z = np.abs(data["obs_ee"][2] - current_z_state)
                     current_z_state = data["obs_ee"][2]
-                    if delta_z < 1e-4:
+                    if delta_z < 2e-3:
                         simplified_lines.append(line)
                         true_target = data["obs_target"]
 
@@ -42,13 +42,20 @@ with open(filename, 'r') as f:
 print("episoded = ", np.array(episodes_true_targets).shape)
 
 episode_counter = 0
+episode_data = []
 with open(output, "w") as outfile:
     for line in simplified_lines:
         data = json.loads(line.strip())
         if data.get("type") == "data":
-            data["obs_target"]= episodes_true_targets[episode_counter]
+            data["obs_target"] = episodes_true_targets[episode_counter]
+            episode_data.append(data)
         elif data.get("type") == "episode_end":
             episode_counter += 1
-        outfile.write(json.dumps(data) + "\n")
+            if len(episode_data) >= 10:
+                [outfile.write(json.dumps(d) + "\n") for d in episode_data]
+                outfile.write(json.dumps(data) + "\n") # episode end
+                episode_data = []
+            else:
+                print("too low")
         
 
