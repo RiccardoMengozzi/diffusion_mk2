@@ -25,8 +25,8 @@ hyperparameters = {
     "action_horizon": 8,
     "pred_horizon": 16,
     "num_diffusion_iters": 100,
-    "num_epochs": 100,
-    "batch_size": 2,
+    "num_epochs": 10000,
+    "batch_size": 1000,
     "lr": 1e-4,
     "weight_decay": 1e-6,
     "warmup_steps": 500,
@@ -34,12 +34,12 @@ hyperparameters = {
     "device": torch.device("cuda"),  # Will default to CUDA if available
     "model_save_path": "weights/diffusion_transformer_model.pth",
     "checkpoint_save_interval": 10,  # Save checkpoint every N epochs
-    "dataset_path": os.path.join(PROJECT_DIR, "zarr_data", "dataset_cleaned_short.zarr.zip"),
+    "dataset_path": os.path.join(PROJECT_DIR, "zarr_data", "dataset_short.zarr.zip"),
 
     # Transformer specific parameters
-    "n_layer": 2,
-    "n_head": 2,
-    "n_emb": 24,
+    "n_layer": 6,
+    "n_head": 6,
+    "n_emb": 768,
     "p_drop_emb": 0.1,
     "p_drop_attn": 0.1,
     "causal_attn": True,

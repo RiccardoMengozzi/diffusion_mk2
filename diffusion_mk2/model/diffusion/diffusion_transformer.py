@@ -150,8 +150,8 @@ class TransformerForDiffusion(ModuleAttrMixin):
 
         # init
         self.apply(self._init_weights)
-        logger.info(
-            "number of parameters: %e", sum(p.numel() for p in self.parameters())
+        print("number of parameters: {:e}".format(
+            sum(p.numel() for p in self.parameters()))
         )
 
     def _init_weights(self, module):

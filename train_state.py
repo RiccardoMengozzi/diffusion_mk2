@@ -28,15 +28,15 @@ hyperparameters = {
     "pred_horizon": 16,
     "num_diffusion_iters": 100,
     "num_epochs": 100000,
-    "batch_size": 1000,
+    "batch_size": 7000,
     "lr": 1e-4,
     "weight_decay": 1e-6,
     "warmup_steps": 500,
     "ema_power": 0.75,
     "device": torch.device("cuda"),  # Will default to CUDA if available
     "model_save_path": "",
-    "checkpoint_save_interval": 200,  # Save checkpoint every N epochs
-    "dataset_path": os.path.join(PROJECT_DIR, "zarr_data", "dataset_short.zarr.zip"),
+    "checkpoint_save_interval": 1000,  # Save checkpoint every N epochs
+    "dataset_path": os.path.join(PROJECT_DIR, "zarr_data", "dataset.zarr.zip"),
 
     # wandb
     "project_name": "diffusion_model",
