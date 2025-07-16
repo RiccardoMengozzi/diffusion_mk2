@@ -207,7 +207,7 @@ def plot_animated_comparison(
 def main():
     # Configuration
     project_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    dataset_path = os.path.join(project_dir, "zarr_data", "combined_dataset_simplified.zarr.zip")
+    dataset_path = os.path.join(project_dir, "zarr_data", "simplified_short.zarr.zip")
     
     obs_ee_dim = 5  # [x, y, z, θ, grip]
     obs_shape_dim = 45  # 15 points * 3

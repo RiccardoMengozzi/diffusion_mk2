@@ -17,11 +17,12 @@ from diffusion_mk2.dataset.shaping_dataset import ShapingDataset
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 hyperparameters = {
+    "n_dim": 2,  # 2d or 3d
     "obs_ee_dim": 3,
     "obs_dlo_dim": 30,
     "obs_target_dim": 30,
     "obs_horizon": 2,
-    "action_dim": 3,
+    "action_dim": 4,  # [idx, x, y, theta]
     "action_horizon": 8,
     "pred_horizon": 16,
     "num_diffusion_iters": 100,
@@ -33,19 +34,20 @@ hyperparameters = {
     "ema_power": 0.75,
     "device": torch.device("cuda"),  # Will default to CUDA if available
     "model_save_path": "",
-    "checkpoint_save_interval": 1000,  # Save checkpoint every N epochs
+    "checkpoint_save_interval": 200,  # Save checkpoint every N epochs
     "dataset_path": os.path.join(
         PROJECT_DIR, "zarr_data", "combined_dataset_simplified.zarr.zip"
     ),
     # wandb
     "project_name": "diffusion_model",
     "entity": "riccardo_mengozzi",
-    "wandb_mode": "online",  # Change to "online" to enable logging
+    "wandb_mode": "disabled",  # Change to "online" to enable logging
 }
 
 
 class DiffusionTrainer:
     def __init__(self, config: dict, checkpoint_path: str = None):
+        self.N_DIM = config.get("n_dim", 2)
         self.OBS_EE_DIM = config.get("obs_ee_dim", 5)
         self.OBS_DLO_DIM = config.get("obs_dlo_dim", 45)
         self.OBS_TARGET_DIM = config.get("obs_target_dim", 45)
@@ -71,7 +73,7 @@ class DiffusionTrainer:
         self.CHECKPOINT_PATH = checkpoint_path
         self.start_epoch = None
 
-        # SIMPLIFICATION CONSTANST #
+        self.DATASET_N_DIM = 3
         self.DATASET_OBS_EE_DIM = 5
         self.DATASET_OBS_DLO_DIM = 45
         self.DATASET_OBS_TARGET_DIM = 45
@@ -182,12 +184,19 @@ class DiffusionTrainer:
             "optimizer_state_dict": self.optimizer.state_dict(),
             "lr_scheduler_state_dict": self.lr_scheduler.state_dict(),
             "avg_loss": avg_loss,
+            "n_dim": self.N_DIM,
             "obs_dim": self.OBS_DIM,
             "obs_ee_dim": self.OBS_EE_DIM,
             "obs_dlo_dim": self.OBS_DLO_DIM,
             "obs_target_dim": self.OBS_TARGET_DIM,
             "obs_horizon": self.OBS_HORIZON,
             "action_dim": self.ACTION_DIM,
+            "dataset_n_dim": self.DATASET_N_DIM,
+            "dataset_obs_ee_dim": self.DATASET_OBS_EE_DIM,
+            "dataset_obs_dlo_dim": self.DATASET_OBS_DLO_DIM,
+            "dataset_obs_target_dim": self.DATASET_OBS_TARGET_DIM,
+            "dataset_obs_dim": self.DATASET_OBS_DIM,
+            "dataset_action_dim": self.DATASET_ACTION_DIM,
             "action_horizon": self.ACTION_HORIZON,
             "pred_horizon": self.PRED_HORIZON,
             "noise_scheduler_config": self.noise_scheduler.config,
@@ -279,12 +288,19 @@ class DiffusionTrainer:
         torch.save(
             {
                 "model_state_dict": ema_model.state_dict(),
+                "n_dim": self.N_DIM,
                 "obs_dim": self.OBS_DIM,
                 "obs_ee_dim": self.OBS_EE_DIM,
                 "obs_dlo_dim": self.OBS_DLO_DIM,
                 "obs_target_dim": self.OBS_TARGET_DIM,
                 "obs_horizon": self.OBS_HORIZON,
                 "action_dim": self.ACTION_DIM,
+                "dataset_n_dim": self.DATASET_N_DIM,
+                "dataset_obs_ee_dim": self.DATASET_OBS_EE_DIM,
+                "dataset_obs_dlo_dim": self.DATASET_OBS_DLO_DIM,
+                "dataset_obs_target_dim": self.DATASET_OBS_TARGET_DIM,
+                "dataset_obs_dim": self.DATASET_OBS_DIM,
+                "dataset_action_dim": self.DATASET_ACTION_DIM,
                 "action_horizon": self.ACTION_HORIZON,
                 "pred_horizon": self.PRED_HORIZON,
                 "noise_scheduler_config": self.noise_scheduler.config,
@@ -303,17 +319,14 @@ class DiffusionTrainer:
         self.noise_pred_net.train()
 
         # Move data to device
-        obs = (
-            batch["obs"].to(self.DEVICE).float()
-        )  # shape: (B, OBS_HORIZON, OBS_DIM) + possibly future
-        actions = (
-            batch["action"].to(self.DEVICE).float()
-        )  # shape: (B, ACTION_HORIZON, ACTION_DIM)
+        obs = (batch["obs"].to(self.DEVICE).float())  
+        actions = (batch["action"].to(self.DEVICE).float())  
+        idxs = (batch["idx"].to(self.DEVICE).long())  # Ensure idxs are long tensor
         batch_size = obs.shape[0]
 
 
         #### SIMPLIFY #####
-        # Keep only x, y, theta for ee_state and action
+        # Keep only x, y, theta and idx for ee_state and action
 
         ee_state = obs[:, :, : self.DATASET_OBS_EE_DIM]
         dlo_state = obs[
@@ -321,7 +334,7 @@ class DiffusionTrainer:
             :,
             self.DATASET_OBS_EE_DIM : self.DATASET_OBS_EE_DIM
             + self.DATASET_OBS_DLO_DIM,
-        ].reshape(batch_size, self.OBS_HORIZON, self.DATASET_OBS_DLO_DIM // 3, 3)
+        ].reshape(batch_size, self.OBS_HORIZON, self.DATASET_OBS_DLO_DIM // self.DATASET_N_DIM, self.DATASET_N_DIM)
         target_state = obs[
             :,
             :,
@@ -329,7 +342,7 @@ class DiffusionTrainer:
             + self.DATASET_OBS_DLO_DIM : self.DATASET_OBS_EE_DIM
             + self.DATASET_OBS_DLO_DIM
             + self.DATASET_OBS_TARGET_DIM,
-        ].reshape(batch_size, self.OBS_HORIZON, self.DATASET_OBS_TARGET_DIM // 3, 3)
+        ].reshape(batch_size, self.OBS_HORIZON, self.DATASET_OBS_TARGET_DIM // self.DATASET_N_DIM, self.DATASET_N_DIM)
 
         ee_state = ee_state[:, :, [0, 1, 3]]  # Keep x, y, theta
         dlo_state = dlo_state[:, :, :, :2]  # Keep x, y of each segment
@@ -346,7 +359,7 @@ class DiffusionTrainer:
             [ee_state, dlo_state, target_state], dim=-1
         )  # Concatenate simplified states
         actions = actions[:, :, [0, 1, 3]]  # Keep x, y, theta
-
+        actions = torch.cat([idxs.unsqueeze(-1), actions], dim=-1) # Add idx as first element
 
         # Flatten observation for FiLM conditioning
         obs_cond = obs[:, : self.OBS_HORIZON, :].flatten(

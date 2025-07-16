@@ -122,6 +122,7 @@ class ShapingDataset(torch.utils.data.Dataset):
             "action": dataset_root["data"]["action"][:],
             # (N, obs_dim)
             "obs": dataset_root["data"]["state"][:],
+            "idx": dataset_root["data"]["idx"][:],
         }
 
         # Marks one-past the last index for each episode
@@ -159,18 +160,21 @@ class ShapingDataset(torch.utils.data.Dataset):
         dlo_states = data["obs"][:, self.obs_ee_dim : self.obs_ee_dim + self.obs_dlo_dim]
         target_shapes = data["obs"][:,self.obs_ee_dim + self.obs_dlo_dim : self.obs_ee_dim + self.obs_dlo_dim + self.obs_target_dim,]
         actions = data["action"]
+        idxs = data["idx"]
 
 
         ee_states_stats = normalization_pca.get_data_stats(ee_states)
-        dlo_states_stats = normalization_pca.get_data_stats(dlo_states)
-        target_shapes_stats = normalization_pca.get_data_stats(target_shapes)
+        dlo_states_stats = normalization_pca.get_data_stats(dlo_states.reshape(-1, 3))
+        target_shapes_stats = normalization_pca.get_data_stats(target_shapes.reshape(-1, 3))
         actions_stats = normalization_pca.get_data_stats(actions)
+        idxs_stats = normalization_pca.get_data_stats(idxs)
 
         return {
             "obs_ee": ee_states_stats,
             "obs_dlo": dlo_states_stats,
             "obs_target": target_shapes_stats,
             "action": actions_stats,
+            "idx": idxs_stats
         }
 
 
@@ -191,11 +195,14 @@ class ShapingDataset(torch.utils.data.Dataset):
         actions_theta = actions[:, 3]  # [dtheta]
         actions_gripper = actions[:, 4]  # [dgripper]
 
+        idxs = data["idx"]
+
 
         normalized_observations = []
         normalized_actions  = []
+        normalized_idxs = []
         
-        for ee_pos, ee_theta, ee_grip, dlo, target, act_pos, act_theta, act_grip in tqdm(zip(
+        for ee_pos, ee_theta, ee_grip, dlo, target, act_pos, act_theta, act_grip, idx in tqdm(zip(
             ee_states_pos,
             ee_states_theta,
             ee_states_gripper,
@@ -204,6 +211,7 @@ class ShapingDataset(torch.utils.data.Dataset):
             actions_pos,
             actions_theta,
             actions_gripper,
+            idxs
         ), desc="Normalizing data", total=len(ee_states_pos)):
             
             cs0, csR = normalization_pca.compute_normalize_factors(dlo)
@@ -216,6 +224,8 @@ class ShapingDataset(torch.utils.data.Dataset):
             action_theta_n = normalization_pca.normalize_min_max(act_theta, self.stats["action"]["min"][3], self.stats["action"]["max"][3])
             action_gripper_n = normalization_pca.normalize_min_max(act_grip, self.stats["action"]["min"][4], self.stats["action"]["max"][4])
 
+            idx_n = normalization_pca.normalize_min_max(idx, self.stats["idx"]["min"], self.stats["idx"]["max"])
+
             ee_state_n = np.concatenate([ee_pos_n.squeeze(), np.array([ee_theta_n]), np.array([ee_gripper_n])])
             action_n = np.concatenate([action_pos_n, np.array([action_theta_n]), np.array([action_gripper_n])])
 
@@ -225,15 +235,18 @@ class ShapingDataset(torch.utils.data.Dataset):
             
             normalized_observations.append(np.concatenate([ee_state_n, dlo_n, target_n]))
             normalized_actions.append(action_n)
+            normalized_idxs.append(idx_n)
 
         normalized_observations = np.array(normalized_observations)
         normalized_actions = np.array(normalized_actions)
+        normalized_idxs = np.array(normalized_idxs)
 
     
 
         return {
             "obs": normalized_observations,
             "action": normalized_actions,
+            "idx": normalized_idxs
         }
             
     def __len__(self):

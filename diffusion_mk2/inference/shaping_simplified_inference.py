@@ -21,7 +21,11 @@ class ShapingInference:
     from observation sequences using a denoising diffusion process.
     """
 
-    def __init__(self, ckp_path: str, device: Union[torch.device, str, None] = None, verbose: bool = True):
+    def __init__(self, 
+                 ckp_path: str, 
+                 num_timesteps: int = 100,
+                 device: Union[torch.device, str, None] = None, 
+                 verbose: bool = True,):
         """
         Initialize the inference model.
 
@@ -30,6 +34,7 @@ class ShapingInference:
             device: Target device for computation (auto-detects if None)
             verbose: Whether to print initialization progress
         """
+        self.num_timesteps = num_timesteps
         self.verbose = verbose
         self.cs0 = None
         self.csR = None
@@ -58,12 +63,18 @@ class ShapingInference:
             
             # Extract required parameters
             self.model_state_dict = ckpt["model_state_dict"]
+            self.n_dim = ckpt["n_dim"]
             self.obs_dim = ckpt["obs_dim"]
             self.obs_ee_dim = ckpt["obs_ee_dim"]
             self.obs_dlo_dim = ckpt["obs_dlo_dim"]
             self.obs_target_dim = ckpt["obs_target_dim"]
             self.obs_horizon = ckpt["obs_horizon"]
             self.action_dim = ckpt["action_dim"]
+            self.dataset_n_dim = ckpt["dataset_n_dim"]
+            self.dataset_obs_ee_dim = ckpt["dataset_obs_ee_dim"]
+            self.dataset_obs_dlo_dim = ckpt["dataset_obs_dlo_dim"]
+            self.dataset_obs_target_dim = ckpt["dataset_obs_target_dim"]
+            self.dataset_action_dim = ckpt["dataset_action_dim"]
             self.action_horizon = ckpt["action_horizon"]
             self.pred_horizon = ckpt["pred_horizon"]
             self.noise_scheduler_config = ckpt["noise_scheduler_config"]
@@ -137,29 +148,25 @@ class ShapingInference:
     def _process_observation_conditioning(self, observation: torch.Tensor) -> torch.Tensor:
         """Process observation for model conditioning."""
         # Extract components
+        
         ee_states = observation[:, :self.obs_ee_dim]
-        ee_states_pos = ee_states[:, :3]  # [x, y, z]
-        ee_states_theta = ee_states[:, 3]  # [theta]
-        ee_states_gripper = ee_states[:, 4]  # [gripper]
-        
-        initial_shape_start = self.obs_ee_dim
-        initial_shape_end = initial_shape_start + self.obs_dlo_dim
-        initial_shapes = observation[:, initial_shape_start:initial_shape_end].reshape(
-            self.obs_horizon, self.obs_dlo_dim // 3, 3
+        ee_states_pos = ee_states[:, :2]  # [x, y]
+        ee_states_theta = ee_states[:, 2]  # [theta]
+
+        initial_shape = observation[:, self.obs_ee_dim:self.obs_ee_dim + self.obs_dlo_dim].reshape(
+            self.obs_horizon, self.obs_dlo_dim // self.n_dim, self.n_dim
         )
-        
-        target_shape_start = initial_shape_end
-        target_shape_end = target_shape_start + self.obs_target_dim
-        target_shapes = observation[:, target_shape_start:target_shape_end].reshape(
-            self.obs_horizon, self.obs_target_dim // 3, 3
+        target_shape = observation[:, self.obs_ee_dim + self.obs_dlo_dim:self.obs_ee_dim + self.obs_dlo_dim * 2].reshape(
+            self.obs_horizon, self.obs_dlo_dim // self.n_dim, self.n_dim
         )
 
-        
         obs_cond = []
-        for ee_state_pos, ee_state_theta, ee_state_gripper, init_shape, target_shape in zip(ee_states_pos, ee_states_theta, ee_states_gripper, initial_shapes, target_shapes):
+
+        for ee_state_pos, ee_state_theta, init_shape, target_shape in zip(
+            ee_states_pos, ee_states_theta, initial_shape, target_shape
+        ):
             ee_state_pos = ee_state_pos.cpu().numpy() if isinstance(ee_state_pos, torch.Tensor) else ee_state_pos
             ee_state_theta = ee_state_theta.cpu().numpy() if isinstance(ee_state_theta, torch.Tensor) else ee_state_theta
-            ee_state_gripper = ee_state_gripper.cpu().numpy() if isinstance(ee_state_gripper, torch.Tensor) else ee_state_gripper
             init_shape = init_shape.cpu().numpy() if isinstance(init_shape, torch.Tensor) else init_shape
             target_shape = target_shape.cpu().numpy() if isinstance(target_shape, torch.Tensor) else target_shape
 
@@ -170,16 +177,18 @@ class ShapingInference:
             target_shape_n = normalization_pca.normalize_pca(target_shape, cs0, csR)
 
             ee_state_pos_n = normalization_pca.normalize_pca(ee_state_pos, cs0, csR)
-            ee_state_theta_n = normalization_pca.normalize_min_max(ee_state_theta, self.dataset_stats["obs_ee"]["min"][3], self.dataset_stats["obs_ee"]["max"][3])
-            ee_state_gripper_n = normalization_pca.normalize_min_max(ee_state_gripper, self.dataset_stats["obs_ee"]["min"][4], self.dataset_stats["obs_ee"]["max"][4])
-            ee_state_n = np.array([ee_state_pos_n[0], ee_state_pos_n[1], ee_state_pos_n[2], ee_state_theta_n, ee_state_gripper_n])
+            ee_state_theta_n = normalization_pca.normalize_min_max(ee_state_theta, 
+                                                                   self.dataset_stats["obs_ee"]["min"][3], 
+                                                                   self.dataset_stats["obs_ee"]["max"][3])
+
+
+            ee_state_n = np.array([ee_state_pos_n[0], ee_state_pos_n[1], ee_state_theta_n])
 
             obs_cond.append(np.concatenate([
                 ee_state_n,
                 init_shape_n.flatten(),
                 target_shape_n.flatten()
             ]))
-
         
         obs_cond = np.array(obs_cond, dtype=np.float32)
 
@@ -196,7 +205,7 @@ class ShapingInference:
         )
         
         # Set up denoising schedule
-        num_steps = self.noise_scheduler.config.num_train_timesteps
+        num_steps = self.num_timesteps
         self.noise_scheduler.set_timesteps(num_steps)
         
         if self.verbose:
@@ -238,10 +247,15 @@ class ShapingInference:
         #     print(f"Dataset stats for {key}: min={data['min']}, max={data['max']}")
 
         # Denormalize final action
-        final_action_pos = final_action[:, :3]  # Assuming first 2 columns are positions
+        final_action_idx = final_action[:, 0]
+        final_action_pos = final_action[:, 1:3]
         final_action_theta = final_action[:, 3]
-        final_action_gripper = final_action[:, 4]
 
+        final_action_idx_dn = normalization_pca.denormalize_min_max_batch(
+            final_action_idx, 
+            self.dataset_stats["idx"]["min"], 
+            self.dataset_stats["idx"]["max"]
+        )
         final_action_pos_dn = normalization_pca.denormalize_pca_batch(
             final_action_pos, self.cs0, self.csR, rotation_only=True
         )
@@ -250,17 +264,12 @@ class ShapingInference:
             self.dataset_stats["action"]["min"][3], 
             self.dataset_stats["action"]["max"][3]
         )
-        final_action_gripper_dn = normalization_pca.denormalize_min_max_batch(
-            final_action_gripper, 
-            self.dataset_stats["action"]["min"][4], 
-            self.dataset_stats["action"]["max"][4]
-        )
+
         final_action_dn = np.column_stack([
+            final_action_idx_dn,
             final_action_pos_dn[:, 0],
             final_action_pos_dn[:, 1],
-            final_action_pos_dn[:, 2],
             final_action_theta_dn,
-            final_action_gripper_dn
         ])
 
 
@@ -272,10 +281,15 @@ class ShapingInference:
         # Process full trajectory
         full_trajectory = []
         for actions in trajectory:
-            actions_pos = actions[:, :3]  # Assuming first 2 columns are positions
+            action_idx = actions[:, 0]
+            actions_pos = actions[:, 1:3]  # Assuming first 2 columns are positions
             actions_theta = actions[:, 3]
-            actions_gripper = actions[:, 4]
 
+            action_idx_dn = normalization_pca.denormalize_min_max_batch(
+                action_idx, 
+                self.dataset_stats["idx"]["min"], 
+                self.dataset_stats["idx"]["max"]
+            )
             actions_pos_dn = normalization_pca.denormalize_pca_batch(
                 actions_pos, self.cs0, self.csR, rotation_only=True
             )
@@ -284,17 +298,11 @@ class ShapingInference:
                 self.dataset_stats["action"]["min"][3], 
                 self.dataset_stats["action"]["max"][3]
             )
-            actions_gripper_dn = normalization_pca.denormalize_min_max_batch(
-                actions_gripper, 
-                self.dataset_stats["action"]["min"][4], 
-                self.dataset_stats["action"]["max"][4]
-            )
             actions_dn = np.column_stack([
+                action_idx_dn,
                 actions_pos_dn[:, 0],
                 actions_pos_dn[:, 1],
-                actions_pos_dn[:, 2],
                 actions_theta_dn,
-                actions_gripper_dn
             ])
 
             full_trajectory.append(np.array(actions_dn))
@@ -338,7 +346,7 @@ class ShapingInference:
 if __name__ == "__main__":
     """Example usage of the ShapingInference class."""
     
-    checkpoint_path = "/home/mengo/Research/LLM_DOM/diffusion_mk2/weights/chkp_dummy-529qk1bd_epoch_30.pt"
+    checkpoint_path = "/home/mengo/Research/LLM_DOM/diffusion_mk2/checkpoints/dummy-kgsamue9/chkp_dummy-kgsamue9_epoch_1.pt"
     
 
     # Initialize model

@@ -1,16 +1,9 @@
 import numpy as np
 
-def get_data_stats(data):
-    """Compute min and max for each dimension of the data.
-    If data has shape (..., 3), flatten all but last dim to get global min/max per x,y,z."""
-    if data.ndim >= 2 and data.shape[-1] == 3:
-        # appiattisci tutte le dimensioni iniziali in un unico asse
-        flat = data.reshape(-1, 3)  
-        min_vals = np.min(flat, axis=0)  # un solo min per x,y,z
-        max_vals = np.max(flat, axis=0)  # un solo max per x,y,z
-    else:
-        min_vals = np.min(data, axis=0)
-        max_vals = np.max(data, axis=0)
+def get_data_stats(data, dlo_dim=None):
+    """Compute min and max for each dimension of the data."""
+    min_vals = np.min(data, axis=0)
+    max_vals = np.max(data, axis=0)
     return {"min": min_vals, "max": max_vals}
 
 

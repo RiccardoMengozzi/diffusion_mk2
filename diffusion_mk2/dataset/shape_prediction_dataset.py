@@ -31,8 +31,8 @@ class DloDataset(Dataset):
         actions = data["actions"]
 
 
-        dlo_states_stats = normalization_pca.get_data_stats(dlo_states)
-        final_shapes_stats = normalization_pca.get_data_stats(final_shapes)
+        dlo_states_stats = normalization_pca.get_data_stats(dlo_states.reshape(-1, dlo_states.shape[-1]))
+        final_shapes_stats = normalization_pca.get_data_stats(final_shapes.reshape(-1, final_shapes.shape[-1]))
         actions_stats = normalization_pca.get_data_stats(actions)
 
         return {

@@ -9,8 +9,8 @@ import json
 
 project_dir   = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # npz_filename  = os.path.join(project_dir, "npz_data", "teleop_pushing_dataset.npz")
-filename  = os.path.join(project_dir, "json_data", "combined_dataset_simplified.jsonl")
-zarr_filename = os.path.join(project_dir, "zarr_data/combined_dataset_simplified.zarr.zip")
+filename  = os.path.join(project_dir, "json_data", "simplified_short.jsonl")
+zarr_filename = os.path.join(project_dir, "zarr_data/simplified_short.zarr.zip")
 
 # ------------------------------------------------------------
 
@@ -23,6 +23,7 @@ def create_zarr_from_npz(npz_path: str, zarr_path: str):
       ├── data/
       │    ├── state          (shape: [N, obs_dim],   dtype=float32)
       │    └── action         (shape: [N, action_dim],dtype=float32)
+           ├── idx               (shape: [N],            dtype=int64)
       └── meta/
            └── episode_ends   (shape: [E],            dtype=int64)
     """

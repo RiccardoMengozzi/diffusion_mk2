@@ -46,7 +46,7 @@ def compute_pose_from_paticle_index(
     ee_offset: float,
 ) -> Tuple[NDArray, NDArray]:
     particle_frames = compute_particle_frames(particles)
-    R_offset = gs.quat_to_R(ee_quat_offset)
+    R_offset = gs.quat_to_R(np.array(ee_quat_offset))
     quaternion = gs.R_to_quat(particle_frames[particle_index] @ R_offset)
     pos = particles[particle_index] + np.array([0.0, 0.0, ee_offset])
     return pos, quaternion
