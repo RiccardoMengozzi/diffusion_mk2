@@ -1,7 +1,7 @@
 inference:
-  model_path: weights/chkp_golden-snowflake-37_epoch_3200.pt
-  number_of_episodes: 10
-  number_of_actions: 10
+  model_path: weights/chkp_visionary-cloud-48_epoch_1000.pt
+  n_episodes: 10
+  n_actions: 10
 
 simulation:
   dt: 0.01  # simulation time step
@@ -21,6 +21,10 @@ simulation:
 
   camera:
     gui: true
+    resolution: [1080, 720]
+    position: [0.5, 0.35, 1.0]
+    lookat: [0.5, 0.0, 0.6]
+    fov: 80 
 
 
 
@@ -38,9 +42,9 @@ entities:
     gravity_compensation: 1.0
 
     end_effector:
-      offset: 0.105
+      offset: 0.11
       z_lift: 0.07
-      quat_rotation: [0.0, 0.0, -1.0, 0.0]
+      rot_offset: [0.0, 0.0, -1.0, 0.0]
       gripper_close_position: 0.0
       gripper_open_position: 0.01
       friction: 5.0

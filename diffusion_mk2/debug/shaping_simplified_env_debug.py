@@ -150,7 +150,8 @@ def plot(
 
         pred_action, _ = model.run_inference(observation=obs_stack)
 
-        pred_delta = pred_action[:, :2]  # Take only first prediction if batch
+        pred_idx = int(pred_action[0, 0])
+        pred_delta = pred_action[:, 1:3]  # Take only first prediction if batch
 
         # Compute normalized direction
         ideal_delta = action_states[:2]
@@ -177,7 +178,8 @@ def plot(
 
         # Plot predicted action
         pred_pt = []
-        pt = ee.copy()
+        print("pred_idx", pred_idx)
+        pt = dlo_states[pred_idx, :2].copy()  # Start from predicted DLO point
         for delta in pred_delta:
             pt += delta
             pred_pt.append(pt.copy())  
@@ -231,8 +233,9 @@ def main():
     action_orig_simplified = action_orig[:, [0, 1, 3]]
 
     model = ShapingInference(
-        ckp_path= os.path.join(project_dir, "weights", "chkp_expert-tree-47_epoch_6000.pt"),
-        num_timesteps=10
+        ckp_path= os.path.join(project_dir, "weights", "chkp_radiant-haze-49_epoch_3000.pt"),
+        num_timesteps=10,
+        verbose=False
     )
 
 

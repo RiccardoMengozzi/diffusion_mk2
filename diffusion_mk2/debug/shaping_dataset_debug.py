@@ -48,6 +48,12 @@ def extract_all_states(dataset_path, dataloader, obs_ee_dim, obs_shape_dim):
     root = zarr.open(dataset_path, mode="r")
     states = root["data"]["state"]
     actions = root["data"]["action"]
+    idxs = root["data"]["idx"]
+
+
+    from collections import Counter
+    print(Counter(np.array(idxs).flatten()))
+
     ee_states = states[:, :obs_ee_dim]  # [x, y, z, θ, grip]
     dlo_states = states[:, obs_ee_dim : obs_ee_dim + obs_shape_dim]
     dlo_targets = states[:, obs_ee_dim + obs_shape_dim : obs_ee_dim + obs_shape_dim + obs_shape_dim]
@@ -61,6 +67,7 @@ def extract_all_states(dataset_path, dataloader, obs_ee_dim, obs_shape_dim):
     proc_dlo = []
     proc_target = []
     proc_action = []
+    proc_idxs = []
     for batch in tqdm(dataloader, desc="extracting data", total=len(dataloader)):
         proc_ee.append(batch["obs"][:, :, :obs_ee_dim].numpy().squeeze())
         proc_dlo.append(
@@ -77,13 +84,15 @@ def extract_all_states(dataset_path, dataloader, obs_ee_dim, obs_shape_dim):
         )
 
         proc_action.append(batch["action"].numpy().squeeze())
+        proc_idxs.append(batch["idx"].numpy().squeeze())
 
     proc_ee = np.array(proc_ee).squeeze()
     proc_dlo = np.array(proc_dlo).squeeze()
     proc_target = np.array(proc_target).squeeze()
     proc_action = np.array(proc_action).squeeze()
+    proc_idxs = np.array(proc_idxs).squeeze()
 
-    return ee_states, dlo_states, dlo_targets, actions, proc_ee, proc_dlo, proc_target, proc_action
+    return ee_states, dlo_states, dlo_targets, actions, idxs, proc_ee, proc_dlo, proc_target, proc_action, proc_idxs
 
 
 
@@ -207,7 +216,7 @@ def plot_animated_comparison(
 def main():
     # Configuration
     project_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    dataset_path = os.path.join(project_dir, "zarr_data", "simplified_short.zarr.zip")
+    dataset_path = os.path.join(project_dir, "zarr_data", "combined_dataset_simplified.zarr.zip")
     
     obs_ee_dim = 5  # [x, y, z, θ, grip]
     obs_shape_dim = 45  # 15 points * 3
@@ -218,7 +227,7 @@ def main():
         dataset_path, obs_ee_dim, obs_shape_dim, obs_target_dim
     )
 
-    ee_orig, dlo_orig, target_orig, action_orig, ee_norm, dlo_norm, target_norm, action_norm = extract_all_states(
+    ee_orig, dlo_orig, target_orig, action_orig, idxs_orig, ee_norm, dlo_norm, target_norm, action_norm, idxs_norm = extract_all_states(
         dataset_path, dataloader, obs_ee_dim, obs_shape_dim
     )
 
@@ -241,7 +250,7 @@ def main():
     dlo_dn_arr = []
     target_dn_arr = []
     action_dn_arr = []
-    for dlo, ee_pos_n, ee_theta_n, ee_grip_n, dlo_n, target_n, act_pos_n, act_theta_n, act_grip_n in zip(
+    for dlo, ee_pos_n, ee_theta_n, ee_grip_n, dlo_n, target_n, act_pos_n, act_theta_n, act_grip_n, idx, idx_n in zip(
         dlo_orig,
         ee_pos_norm, 
         ee_theta_norm, 
@@ -250,7 +259,9 @@ def main():
         target_norm, 
         action_pos_norm,
         action_theta_norm,
-        action_gripper_norm
+        action_gripper_norm,
+        idxs_orig,
+        idxs_norm
     ):
             cs0, csR = normalization_pca.compute_normalize_factors(dlo)
    
@@ -262,9 +273,11 @@ def main():
             ee_gripper_dn = normalization_pca.denormalize_min_max(ee_grip_n, dataset.stats["obs_ee"]["min"][4], dataset.stats["obs_ee"]["max"][4])
             action_theta_dn = normalization_pca.denormalize_min_max(act_theta_n, dataset.stats["action"]["min"][3], dataset.stats["action"]["max"][3])
             action_gripper_dn = normalization_pca.denormalize_min_max(act_grip_n, dataset.stats["action"]["min"][4], dataset.stats["action"]["max"][4])
+            idx_dn = normalization_pca.denormalize_min_max(idx_n, dataset.stats["idx"]["min"], dataset.stats["idx"]["max"])
 
             ee_state_dn = np.concatenate([ee_pos_dn.squeeze(), np.array([ee_theta_dn]), np.array([ee_gripper_dn])])
             action_dn = np.concatenate([action_pos_dn, np.array([action_theta_dn]), np.array([action_gripper_dn])])
+
 
             ee_dn_arr.append(ee_state_dn)
             dlo_dn_arr.append(dlo_dn)

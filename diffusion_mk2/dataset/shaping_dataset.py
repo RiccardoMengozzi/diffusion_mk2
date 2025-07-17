@@ -197,7 +197,6 @@ class ShapingDataset(torch.utils.data.Dataset):
 
         idxs = data["idx"]
 
-
         normalized_observations = []
         normalized_actions  = []
         normalized_idxs = []
@@ -277,7 +276,7 @@ class ShapingDataset(torch.utils.data.Dataset):
 if __name__ == "__main__":
     # Example usage
     dataset = ShapingDataset(
-        dataset_path="/home/mengo/Research/LLM_DOM/diffusion_mk2/zarr_data/dataset_cleaned.zarr.zip",
+        dataset_path="/home/mengo/Research/LLM_DOM/diffusion_mk2/zarr_data/simplified_short.zarr.zip",
         pred_horizon=16,
         obs_horizon=2,
         action_horizon=8,

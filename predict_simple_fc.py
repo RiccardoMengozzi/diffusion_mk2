@@ -10,7 +10,7 @@ from diffusion_mk2.model import normalization_pca
 MAIN_DIR = os.path.join(os.path.dirname(__file__), "..")
 
 DATA_PATH = "/home/mengo/Research/LLM_DOM/diffusion_mk2/zarr_data/shape_prediction.zarr.zip"
-CHECKPOINT_PATH = "/home/mengo/Research/LLM_DOM/diffusion_mk2/weights/chkp_50000.pt"
+CHECKPOINT_PATH = "/home/mengo/Research/LLM_DOM/diffusion_mk2/weights/shape_prediction_final_model.pt"
 
 state = torch.load(CHECKPOINT_PATH, weights_only=False)
 ###################################
@@ -62,21 +62,21 @@ for i, data in enumerate(loader):
     idx = int(idx)
     true_start_pos = dlo_0[idx, :2]
     true_end_pos = true_start_pos + action[1:3]
-    # plt.arrow(
-    #     true_start_pos[0],
-    #     true_start_pos[1],
-    #     action[1],
-    #     action[2],
-    #     head_width=0.005,
-    #     head_length=0.01,
-    #     fc="green",
-    #     ec="green",
-    #     length_includes_head=True,
-    #     label="action",
-    # )
-    # plt.scatter(
-    #     true_end_pos[0], true_end_pos[1], marker="*", s=120, color="green", label="action_end"
-    # )
+    plt.arrow(
+        true_start_pos[0],
+        true_start_pos[1],
+        action[1],
+        action[2],
+        head_width=0.005,
+        head_length=0.01,
+        fc="green",
+        ec="green",
+        length_includes_head=True,
+        label="action",
+    )
+    plt.scatter(
+        true_end_pos[0], true_end_pos[1], marker="*", s=120, color="green", label="action_end"
+    )
 
     ax = plt.gca()
     ax.set_title(f"Error NN {(loss*1000):.2f} [mm]", fontsize=10)

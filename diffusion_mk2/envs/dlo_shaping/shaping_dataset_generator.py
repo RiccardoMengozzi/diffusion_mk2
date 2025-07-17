@@ -318,7 +318,7 @@ class GripperDataGenerator():
              force_control=False,
              force_intensity=1,
              path_period=0.5,
-             tolerance=1e-7,
+             tolerance=1e-4,
              save_data=False):
         """ Primitive move function """
         # If I already provide qpos, i don't compute it

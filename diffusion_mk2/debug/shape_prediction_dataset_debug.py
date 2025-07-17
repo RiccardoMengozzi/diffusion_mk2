@@ -89,7 +89,7 @@ def load_dataset(dataset_path, num_points):
 
 
 if __name__ == "__main__":
-    dataset_path = "/home/mengo/Research/LLM_DOM/diffusion_mk2/zarr_data/shape_prediction_simplified.zarr.zip"
+    dataset_path = "/home/mengo/Research/LLM_DOM/diffusion_mk2/zarr_data/shape_prediction.zarr.zip"
     
     dataset, dataloader = load_dataset(
         dataset_path=dataset_path,
