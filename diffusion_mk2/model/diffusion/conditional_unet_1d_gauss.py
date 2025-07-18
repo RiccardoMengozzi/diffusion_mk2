@@ -217,12 +217,12 @@ if __name__ == "__main__":
     # Test
     obs_dim = 63
     obs_horizon = 2
-    action_dim = 4
+    action_dim = 3
     pred_horizon = 16
 
 
     model = ConditionalUnet1D(
-        input_dim=4,  # [idx, x, y, θ]
+        input_dim=action_dim,  # [idx, x, y, θ]
         global_cond_dim=obs_dim * obs_horizon,
         num_idx_classes=15,  # <- specify number of idx classes
     )     

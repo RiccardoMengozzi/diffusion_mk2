@@ -1,0 +1,296 @@
+# @markdown ### **Dataset**
+# @markdown
+# @markdown Defines `PushTStateDataset` and helper functions
+# @markdown
+# @markdown The dataset class
+# @markdown - Load data (obs, action) from a zarr storage
+# @markdown - Normalizes each dimension of obs and action to [-1,1]
+# @markdown - Returns
+# @markdown  - All possible segments with length `pred_horizon`
+# @markdown  - Pads the beginning and the end of each episode with repetition
+# @markdown  - key `obs`: shape (obs_horizon, obs_dim)
+# @markdown  - key `action`: shape (pred_horizon, action_dim)
+
+import numpy as np
+import zarr
+import torch
+from tqdm import tqdm
+from diffusion_mk2.model import gaussian, normalization_pca
+
+
+def create_sample_indices(
+    episode_ends: np.ndarray,
+    sequence_length: int,
+    pad_before: int = 0,
+    pad_after: int = 0,
+):
+    indices = list()
+    for i in range(len(episode_ends)):
+        start_idx = 0
+        if i > 0:
+            start_idx = episode_ends[i - 1]
+        end_idx = episode_ends[i]
+        episode_length = end_idx - start_idx
+
+        # [start_idx, end_idx) defines the entire episode
+        min_start = -pad_before
+        max_start = episode_length - sequence_length + pad_after
+        # [min_start, max_start] defines the observation-action sequence
+
+        # range stops one idx before end
+        for idx in range(min_start, max_start + 1):
+            buffer_start_idx = max(idx, 0) + start_idx
+            buffer_end_idx = min(idx + sequence_length, episode_length) + start_idx
+            start_offset = buffer_start_idx - (idx + start_idx)
+            end_offset = (idx + sequence_length + start_idx) - buffer_end_idx
+            sample_start_idx = 0 + start_offset
+            sample_end_idx = sequence_length - end_offset
+            indices.append(
+                [buffer_start_idx, buffer_end_idx, sample_start_idx, sample_end_idx]
+            )
+        # [buffer_start_idx, buffer_end_idx] defines the data segment in the input data array
+        # [sample_start_idx, sample_end_idx] defines the mapping to the output data that will be used in training
+        # In the first segment, for example, if i have the "obs_horizon" of 2, i wont be able to have the previous observation,
+        # because that would be idx = -1, so that will be padded. in this case i will have:
+        # buffer_start_idx = 0, buffer_end_idx = 16, sample_start_idx = 1, sample_end_idx = 16
+        # Same thing at the end of the episode, if i have the "action_horizon" of 16, i wont be able to have the next 15 actions,
+        # so that will be padded. in this case i will have:
+        # buffer_start_idx = N - 15, buffer_end_idx = N, sample_start_idx = 0, sample_end_idx = 1, the next 15 actions will be padded
+        # with the last action (this if the episode finish exactly at the end of the dataset... if the episode finishes before, probably i
+        # will need less padding, for example:
+        #  [25636 25650     0    14]
+        #  [25637 25650     0    13]
+        #  [25638 25650     0    12]
+        #  [25639 25650     0    11]
+        #  [25640 25650     0    10]
+        #  [25641 25650     0     9]]
+
+    indices = np.array(indices)
+    return indices
+
+
+def sample_sequence(
+    train_data,
+    sequence_length,
+    buffer_start_idx,
+    buffer_end_idx,
+    sample_start_idx,
+    sample_end_idx,
+):
+    result = dict()
+    for key, input_arr in train_data.items():
+        sample = input_arr[buffer_start_idx:buffer_end_idx]
+        data = sample
+        if (sample_start_idx > 0) or (sample_end_idx < sequence_length):
+            data = np.zeros(
+                shape=(sequence_length,) + input_arr.shape[1:], dtype=input_arr.dtype
+            )
+            if sample_start_idx > 0:
+                data[:sample_start_idx] = sample[0]
+            if sample_end_idx < sequence_length:
+                data[sample_end_idx:] = sample[-1]
+            data[sample_start_idx:sample_end_idx] = sample
+        result[key] = data
+    return result
+
+
+# normalize data
+
+
+# dataset
+class ShapingDataset(torch.utils.data.Dataset):
+    def __init__(
+        self,
+        dataset_path,
+        pred_horizon,
+        obs_horizon,
+        action_horizon,
+        obs_ee_dim,
+        obs_dlo_dim,
+        obs_target_dim,
+    ):
+
+        self.obs_ee_dim = obs_ee_dim
+        self.obs_dlo_dim = obs_dlo_dim
+        self.obs_target_dim = obs_target_dim
+        # read from zarr dataset
+        dataset_root = zarr.open(dataset_path, "r")
+
+        # All demonstration episodes are concatinated in the first dimension N
+        train_data = {
+            # (N, action_dim)
+            "action": dataset_root["data"]["action"][:],
+            # (N, obs_dim)
+            "obs": dataset_root["data"]["state"][:],
+            "idx": dataset_root["data"]["idx"][:],
+        }
+
+        # Marks one-past the last index for each episode
+        episode_ends = dataset_root["meta"]["episode_ends"][:]
+        self.episode_ends = episode_ends
+        # compute start and end of each state-action sequence
+        # also handles padding
+        indices = create_sample_indices(
+            episode_ends=episode_ends,
+            sequence_length=pred_horizon,
+            # add padding such that each timestep in the dataset are seen
+            pad_before=obs_horizon - 1,
+            pad_after=action_horizon - 1,
+        )
+
+        # compute statistics and normalized data to [-1,1]
+        # stats = dict()
+        # normalized_train_data = dict()
+        # for key, data in train_data.items():
+        #     stats[key] = get_data_stats(data)
+        #     normalized_train_data[key] = normalize_data(data, stats[key])
+
+        self.indices = indices
+        self.pred_horizon = pred_horizon
+        self.action_horizon = action_horizon
+        self.obs_horizon = obs_horizon
+
+
+
+        self.stats = self.get_data_stats(train_data)
+        self.normalized_train_data = self.normalize_data(train_data)
+
+    def get_data_stats(self, data):
+        ee_states = data["obs"][:, : self.obs_ee_dim]
+        dlo_states = data["obs"][:, self.obs_ee_dim : self.obs_ee_dim + self.obs_dlo_dim]
+        target_shapes = data["obs"][:,self.obs_ee_dim + self.obs_dlo_dim : self.obs_ee_dim + self.obs_dlo_dim + self.obs_target_dim,]
+        actions = data["action"]
+        idxs = data["idx"]
+
+
+        ee_states_stats = normalization_pca.get_data_stats(ee_states)
+        dlo_states_stats = normalization_pca.get_data_stats(dlo_states.reshape(-1, 3))
+        target_shapes_stats = normalization_pca.get_data_stats(target_shapes.reshape(-1, 3))
+        actions_stats = normalization_pca.get_data_stats(actions)
+        idxs_stats = normalization_pca.get_data_stats(idxs)
+
+        return {
+            "obs_ee": ee_states_stats,
+            "obs_dlo": dlo_states_stats,
+            "obs_target": target_shapes_stats,
+            "action": actions_stats,
+            "idx": idxs_stats
+        }
+
+
+    def normalize_data(self, data):
+
+        ee_states = data["obs"][:, : self.obs_ee_dim]
+        dlo_states = data["obs"][:, self.obs_ee_dim : self.obs_ee_dim + self.obs_dlo_dim]
+        target_shapes = data["obs"][:,self.obs_ee_dim + self.obs_dlo_dim : self.obs_ee_dim + self.obs_dlo_dim + self.obs_target_dim]
+
+        dlo_states = dlo_states.reshape(-1, self.obs_dlo_dim // 3, 3)
+        target_shapes = target_shapes.reshape(-1, self.obs_target_dim // 3, 3)
+        ee_states_pos = ee_states[:, :3]  # [x, y, z]
+        ee_states_theta = ee_states[:, 3]  # [theta]
+        ee_states_gripper = ee_states[:, 4]  # [gripper
+
+        actions = data["action"]
+        actions_pos = actions[:, :3]  # [dx, dy, dz]
+        actions_theta = actions[:, 3]  # [dtheta]
+        actions_gripper = actions[:, 4]  # [dgripper]
+
+        idxs = data["idx"]
+
+        normalized_observations = []
+        normalized_actions  = []
+        normalized_idxs = []
+        
+        for ee_pos, ee_theta, ee_grip, dlo, target, act_pos, act_theta, act_grip, idx in tqdm(zip(
+            ee_states_pos,
+            ee_states_theta,
+            ee_states_gripper,
+            dlo_states,
+            target_shapes,
+            actions_pos,
+            actions_theta,
+            actions_gripper,
+            idxs
+        ), desc="Normalizing data", total=len(ee_states_pos)):
+            
+            cs0, csR = normalization_pca.compute_normalize_factors(dlo)
+            ee_pos_n = normalization_pca.normalize_pca(ee_pos, cs0, csR)
+            dlo_n = normalization_pca.normalize_pca(dlo, cs0, csR)
+            target_n = normalization_pca.normalize_pca(target, cs0, csR)
+            action_pos_n = normalization_pca.normalize_pca(act_pos, cs0, csR, rotation_only=True)
+            ee_theta_n = normalization_pca.normalize_min_max(ee_theta, self.stats["obs_ee"]["min"][3], self.stats["obs_ee"]["max"][3])
+            ee_gripper_n = normalization_pca.normalize_min_max(ee_grip, self.stats["obs_ee"]["min"][4], self.stats["obs_ee"]["max"][4])
+            action_theta_n = normalization_pca.normalize_min_max(act_theta, self.stats["action"]["min"][3], self.stats["action"]["max"][3])
+            action_gripper_n = normalization_pca.normalize_min_max(act_grip, self.stats["action"]["min"][4], self.stats["action"]["max"][4])
+
+            idx_n = gaussian.gaussian_1D_label(idx, dlo.shape[0], sig=4)
+            
+            ee_state_n = np.concatenate([ee_pos_n.squeeze(), np.array([ee_theta_n]), np.array([ee_gripper_n])])
+            action_n = np.concatenate([action_pos_n, np.array([action_theta_n]), np.array([action_gripper_n])])
+
+            ee_state_n = ee_state_n.flatten()
+            dlo_n = dlo_n.flatten()
+            target_n = target_n.flatten()
+            
+            normalized_observations.append(np.concatenate([ee_state_n, dlo_n, target_n]))
+            normalized_actions.append(action_n)
+            normalized_idxs.append(idx_n)
+
+        normalized_observations = np.array(normalized_observations)
+        normalized_actions = np.array(normalized_actions)
+        normalized_idxs = np.array(normalized_idxs)
+
+    
+
+        return {
+            "obs": normalized_observations,
+            "action": normalized_actions,
+            "idx": normalized_idxs
+        }
+            
+    def __len__(self):
+        # all possible segments of the dataset
+        return len(self.indices)
+
+    def __getitem__(self, idx):
+        # get the start/end indices for this datapoint
+        buffer_start_idx, buffer_end_idx, sample_start_idx, sample_end_idx = (
+            self.indices[idx]
+        )
+
+        # get nomralized data using these indices
+        nsample = sample_sequence(
+            train_data=self.normalized_train_data,
+            sequence_length=self.pred_horizon,
+            buffer_start_idx=buffer_start_idx,
+            buffer_end_idx=buffer_end_idx,
+            sample_start_idx=sample_start_idx,
+            sample_end_idx=sample_end_idx,
+        )
+
+        # discard unused observations
+        nsample["obs"] = nsample["obs"][: self.obs_horizon, :]
+        return nsample
+
+
+if __name__ == "__main__":
+    # Example usage
+    dataset = ShapingDataset(
+        dataset_path="/home/mengo/Research/LLM_DOM/diffusion_mk2/zarr_data/simplified_short.zarr.zip",
+        pred_horizon=16,
+        obs_horizon=2,
+        action_horizon=8,
+        obs_ee_dim=5,
+        obs_dlo_dim=45,
+        obs_target_dim=45,
+    )
+
+    print("Dataset length:", len(dataset))
+    sample = dataset[3]
+    print("episode ends:", dataset.episode_ends)
+    # print("Sample keys:", sample.keys())
+    # print("Sample obs shape:", sample['obs'].shape)
+    # print("Sample action shape:", sample['action'].shape)
+    # print("Stats:", dataset.stats)
+    # print("First 20 obs:", sample['obs'])
+    # print("First 20 actions:", sample['action'][:20])

@@ -11,8 +11,8 @@ from diffusers.training_utils import EMAModel
 from diffusers import get_scheduler
 from diffusers.schedulers import DDPMScheduler
 
-from diffusion_mk2.model.diffusion.conditional_unet_1d import ConditionalUnet1D
-from diffusion_mk2.dataset.shaping_dataset import ShapingDataset
+from diffusion_mk2.model.diffusion.conditional_unet_1d_gauss import ConditionalUnet1D
+from diffusion_mk2.dataset.shaping_dataset_gauss import ShapingDataset
 
 PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -22,12 +22,12 @@ hyperparameters = {
     "obs_dlo_dim": 30,
     "obs_target_dim": 30,
     "obs_horizon": 2,
-    "action_dim": 4,  # [idx, x, y, theta]
+    "action_dim": 3,  # [x, y, theta]
     "action_horizon": 8,
     "pred_horizon": 16,
     "num_diffusion_iters": 100,
     "num_epochs": 100000,
-    "batch_size": 7000,
+    "batch_size": 2,
     "lr": 1e-4,
     "weight_decay": 1e-6,
     "warmup_steps": 500,
@@ -118,6 +118,7 @@ class DiffusionTrainer:
         self.noise_pred_net = ConditionalUnet1D(
             input_dim=self.ACTION_DIM,
             global_cond_dim=self.OBS_DIM * self.OBS_HORIZON,
+            num_idx_classes=self.OBS_DLO_DIM // self.N_DIM
         ).to(self.DEVICE)
 
         # EMA wrapper
@@ -172,6 +173,7 @@ class DiffusionTrainer:
         ema_model = ConditionalUnet1D(
             input_dim=self.ACTION_DIM,
             global_cond_dim=self.OBS_DIM * self.OBS_HORIZON,
+            num_idx_classes=self.OBS_DLO_DIM // self.N_DIM
         ).to(self.DEVICE)
         self.ema.copy_to(ema_model.parameters())
 
@@ -279,6 +281,7 @@ class DiffusionTrainer:
         ema_model = ConditionalUnet1D(
             input_dim=self.ACTION_DIM,
             global_cond_dim=self.OBS_DIM * self.OBS_HORIZON,
+            num_idx_classes=self.OBS_DLO_DIM // self.N_DIM
         ).to(self.DEVICE)
         self.ema.copy_to(ema_model.parameters())
 
@@ -321,7 +324,7 @@ class DiffusionTrainer:
         # Move data to device
         obs = (batch["obs"].to(self.DEVICE).float())  
         actions = (batch["action"].to(self.DEVICE).float())  
-        idxs = (batch["idx"].to(self.DEVICE).long())  # Ensure idxs are long tensor
+        idxs = (batch["idx"].to(self.DEVICE).float())  # Ensure idxs are float tensor
         batch_size = obs.shape[0]
 
 
@@ -359,7 +362,6 @@ class DiffusionTrainer:
             [ee_state, dlo_state, target_state], dim=-1
         )  # Concatenate simplified states
         actions = actions[:, :, [0, 1, 3]]  # Keep x, y, theta
-        actions = torch.cat([idxs.unsqueeze(-1), actions], dim=-1) # Add idx as first element
 
         # Flatten observation for FiLM conditioning
         obs_cond = obs[:, : self.OBS_HORIZON, :].flatten(
@@ -379,10 +381,17 @@ class DiffusionTrainer:
         noisy_actions = self.noise_scheduler.add_noise(actions, noise, timesteps)
 
         # Predict noise
-        noise_pred = self.noise_pred_net(noisy_actions, timesteps, global_cond=obs_cond)
+        idx_gaussian, noise_pred = self.noise_pred_net(noisy_actions, timesteps, global_cond=obs_cond)
+
+
+        loss_idx = nn.functional.binary_cross_entropy_with_logits(
+            idx_gaussian, idxs
+        )
 
         # Compute L2 loss
-        loss = nn.functional.mse_loss(noise_pred, noise)
+        loss_coord = nn.functional.mse_loss(noise_pred, noise)
+
+        loss = loss_idx + loss_coord
 
         # Backpropagate and step optimizer + scheduler
         loss.backward()
