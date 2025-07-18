@@ -5,6 +5,7 @@ import argparse
 from tqdm import tqdm
 import time
 import collections
+from matplotlib import pyplot as plt
 from scipy.spatial.transform import Rotation as R
 from genesis.engine.entities import RigidEntity, MPMEntity
 from genesis.engine.entities.rigid_entity import RigidLink
@@ -152,7 +153,46 @@ class ShapingSimplifiedEnv:
         obs = self.get_obs()
         self.obs_deque = collections.deque([obs] * self.obs_horizon, maxlen=self.obs_horizon)
 
+        self.ready_to_plot = False
+        self.current_pred_action = None
 
+    def plot(self):
+        plt.ion()  # Enable interactive mode
+
+        if not hasattr(self, "_fig") or self._fig is None:
+            self._fig, self._ax = plt.subplots(figsize=(6, 6))
+        else:
+            self._ax.clear()
+
+        current_dlo_shape = dlo_computations.get_skeleton(
+            self.dlo.get_particles(),
+            downsample_number=self.config.dlo.number_of_particles,
+            average_number=self.config.dlo.particles_smoothing,
+        )
+        target_shape = self.target[:, :2]
+        pred_action = self.current_pred_action[:, 1:3]
+
+        self._ax.plot(current_dlo_shape[:, 0], current_dlo_shape[:, 1], "o-", label="DLO", linewidth=2, markersize=4)
+        self._ax.plot(target_shape[:, 0], target_shape[:, 1], "o-", label="Target", linewidth=2, markersize=4)
+
+        if pred_action is not None:
+            pred_pt = []
+            pt = self.end_effector.get_pos().cpu().numpy()[:2]
+            for delta in pred_action:
+                pt += delta
+                pred_pt.append(pt.copy())
+            pred_pt = np.array(pred_pt)
+            self._ax.plot(pred_pt[:, 0], pred_pt[:, 1], "^-", label="Predicted Action", linewidth=2, markersize=4)
+
+        self._ax.set_xlabel("X")
+        self._ax.set_ylabel("Y")
+        self._ax.set_title("DLO vs Target in XY Plane")
+        self._ax.legend()
+        self._ax.axis("equal")
+        self._ax.grid(True)
+
+        self._fig.canvas.draw()
+        self._fig.canvas.flush_events()
 
 
     def _step(self):
@@ -164,6 +204,10 @@ class ShapingSimplifiedEnv:
 
         if self.config.simulation.camera.record:
             self.cam.render()
+
+        if self.config.inference.plot and self.ready_to_plot:
+            self.plot()
+
 
         if self.config.simulation.show_real_time_factor:
             print(f"Real-time factor: {self.real_time_factor:.2f}")
@@ -363,9 +407,9 @@ class ShapingSimplifiedEnv:
 
         for _ in tqdm(range(self.config.inference.n_episodes), desc="Episodes"):
             self.reset_episode()
-            time.sleep(2)
             for _ in tqdm(range(self.config.inference.n_actions), desc="Actions"):
                 self.reset_action()
+                self.ready_to_plot = True
                 obs = self.get_obs()
 
                 self.obs_deque.append(obs)
@@ -375,11 +419,15 @@ class ShapingSimplifiedEnv:
                 pred_action, pred_actions = self.model.run_inference(
                     observation=obs,
                 )
+                self.current_pred_action = pred_action
                 self.draw_trajectory(pred_action)
                 self.execute_trajectory(pred_action)
 
         if self.config.simulation.camera.record:
             self.cam.stop_recording(save_to_filename='video.mp4', fps=60)
+        if self.config.inference.plot:
+            plt.ioff()
+            plt.close("all")
 
 def main():
     parser = argparse.ArgumentParser(description="Teleop Push Data Generator")
@@ -405,6 +453,9 @@ def main():
     )
     parser.add_argument(
         "-r", "--record", action="store_true", help="Record the simulation"
+    )
+    parser.add_argument(
+        "-p", "--plot", action="store_true", help="Plot the results"
     )
     args = parser.parse_args()
 

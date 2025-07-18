@@ -80,6 +80,7 @@ class InferenceConfig:
     model_path: str = ""
     n_episodes: int = 1
     n_actions: int = 1
+    plot: bool = False
 
 @dataclass
 class ShapingConfig:
@@ -145,3 +146,5 @@ class ShapingConfig:
             self.inference.n_actions = args.n_actions
         if args.record is not None:
             self.simulation.camera.record = args.record
+        if args.plot is not None:
+            self.inference.plot = args.plot
