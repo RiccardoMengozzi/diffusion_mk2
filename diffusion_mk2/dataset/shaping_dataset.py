@@ -158,7 +158,8 @@ class ShapingDataset(torch.utils.data.Dataset):
     def get_data_stats(self, data):
         ee_states = data["obs"][:, : self.obs_ee_dim]
         dlo_states = data["obs"][:, self.obs_ee_dim : self.obs_ee_dim + self.obs_dlo_dim]
-        target_shapes = data["obs"][:,self.obs_ee_dim + self.obs_dlo_dim : self.obs_ee_dim + self.obs_dlo_dim + self.obs_target_dim,]
+        print("data['obs'].shape", data["obs"].shape, "obs_ee_dim", self.obs_ee_dim, "obs_dlo_dim", self.obs_dlo_dim)
+        target_shapes = data["obs"][:,self.obs_ee_dim + self.obs_dlo_dim : self.obs_ee_dim + self.obs_dlo_dim + self.obs_target_dim]
         actions = data["action"]
         idxs = data["idx"]
 
@@ -166,6 +167,7 @@ class ShapingDataset(torch.utils.data.Dataset):
 
         ee_states_stats = normalization_pca.get_data_stats(ee_states)
         dlo_states_stats = normalization_pca.get_data_stats(dlo_states.reshape(-1, 3))
+        print("target_shapes.shape", target_shapes.shape)
         target_shapes_stats = normalization_pca.get_data_stats(target_shapes.reshape(-1, 3))
         actions_stats = normalization_pca.get_data_stats(actions)
         idxs_stats = normalization_pca.get_data_stats(idxs)
@@ -277,13 +279,13 @@ class ShapingDataset(torch.utils.data.Dataset):
 if __name__ == "__main__":
     # Example usage
     dataset = ShapingDataset(
-        dataset_path="/home/mengo/Research/LLM_DOM/diffusion_mk2/zarr_data/simplified_short.zarr.zip",
+        dataset_path="/home/mengo/Research/LLM_DOM/diffusion_mk2/zarr_data/train3_short.zarr.zip",
         pred_horizon=16,
         obs_horizon=2,
         action_horizon=8,
         obs_ee_dim=5,
-        obs_dlo_dim=45,
-        obs_target_dim=45,
+        obs_dlo_dim=153,
+        obs_target_dim=153,
     )
 
     print("Dataset length:", len(dataset))

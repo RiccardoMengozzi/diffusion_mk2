@@ -124,17 +124,17 @@ def plot_animated_comparison(
 
     # Precompute axis limits for each dataset
     limits = []
-    x_min, x_max = 0.4, 0.6
-    y_min, y_max = -0.1, 0.1
-    z_min, z_max = 0.6, 0.8
+    x_min, x_max = 0.0, 0.6
+    y_min, y_max = -0.3, 0.3
+    z_min, z_max = 0.4, 1.0
     limits.append((x_min, x_max, y_min, y_max, z_min, z_max))  # Placeholder for limits
-    x_min, x_max = -0.1, 0.1
-    y_min, y_max = -0.1, 0.1
-    z_min, z_max = -0.1, 0.1
+    x_min, x_max = -0.3, 0.3
+    y_min, y_max = -0.3, 0.3
+    z_min, z_max = -0.3, 0.3
     limits.append((x_min, x_max, y_min, y_max, z_min, z_max))  # Placeholder for limits
-    x_min, x_max = 0.4, 0.6
-    y_min, y_max = -0.1, 0.1
-    z_min, z_max = 0.6, 0.8
+    x_min, x_max = 0.0, 0.6
+    y_min, y_max = -0.3, 0.3
+    z_min, z_max = 0.4, 1.0
     limits.append((x_min, x_max, y_min, y_max, z_min, z_max))  # Placeholder for limits
     # for ee_states, dlo_states, title in datasets:
     #     all_pts = dlo_states.reshape(-1, 3)
@@ -216,11 +216,11 @@ def plot_animated_comparison(
 def main():
     # Configuration
     project_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    dataset_path = os.path.join(project_dir, "zarr_data", "combined_dataset_simplified.zarr.zip")
+    dataset_path = os.path.join(project_dir, "zarr_data", "train3_short.zarr.zip")
     
     obs_ee_dim = 5  # [x, y, z, θ, grip]
-    obs_shape_dim = 45  # 15 points * 3
-    obs_target_dim = 45
+    obs_shape_dim = 153  # 15 points * 3
+    obs_target_dim = 153
 
     # Load and extract
     dataset, dataloader = load_dataset(

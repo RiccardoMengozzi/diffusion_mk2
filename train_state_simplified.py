@@ -19,8 +19,8 @@ PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
 hyperparameters = {
     "n_dim": 2,  # 2d or 3d
     "obs_ee_dim": 3,
-    "obs_dlo_dim": 30,
-    "obs_target_dim": 30,
+    "obs_dlo_dim": 102,
+    "obs_target_dim": 102,
     "obs_horizon": 2,
     "action_dim": 4,  # [idx, x, y, theta]
     "action_horizon": 8,
@@ -36,7 +36,7 @@ hyperparameters = {
     "model_save_path": "",
     "checkpoint_save_interval": 200,  # Save checkpoint every N epochs
     "dataset_path": os.path.join(
-        PROJECT_DIR, "zarr_data", "combined_dataset_simplified.zarr.zip"
+        PROJECT_DIR, "zarr_data", "train3.zarr.zip"
     ),
     # wandb
     "project_name": "diffusion_model",
@@ -75,8 +75,8 @@ class DiffusionTrainer:
 
         self.DATASET_N_DIM = 3
         self.DATASET_OBS_EE_DIM = 5
-        self.DATASET_OBS_DLO_DIM = 45
-        self.DATASET_OBS_TARGET_DIM = 45
+        self.DATASET_OBS_DLO_DIM = 153
+        self.DATASET_OBS_TARGET_DIM = 153
         self.DATASET_OBS_DIM = (
             self.DATASET_OBS_EE_DIM
             + self.DATASET_OBS_DLO_DIM

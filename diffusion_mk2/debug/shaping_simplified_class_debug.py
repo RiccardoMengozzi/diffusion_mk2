@@ -8,7 +8,7 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 from diffusion_mk2.model import normalization_pca
 from diffusion_mk2.dataset.shaping_dataset import ShapingDataset
-from diffusion_mk2.inference.shaping_simplified_inference import ShapingInference
+from diffusion_mk2.inference.shaping_simplified_inference_class import ShapingInference
 import collections
 
 
@@ -148,9 +148,8 @@ def plot(
         obs_deque.append(obs)
         obs_stack = np.stack(obs_deque).reshape(model.obs_horizon, -1)
 
-        pred_action, _ = model.run_inference(observation=obs_stack)
-
-        pred_idx = int(pred_action[0, 0])
+        idx_logits, pred_action, _ = model.run_inference(observation=obs_stack) 
+        pred_idx = np.argmax(idx_logits.squeeze().cpu().numpy())
         pred_delta = pred_action[:, 1:3]  # Take only first prediction if batch
 
         # Compute normalized direction
