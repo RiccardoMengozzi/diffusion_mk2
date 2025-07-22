@@ -1,0 +1,251 @@
+"""
+https://github.com/real-stanford/diffusion_policy
+"""
+
+import torch 
+import torch.nn as nn
+from typing import Union
+from diffusion_mk2.model.diffusion.positional_embedding import SinusoidalPosEmb
+from diffusion_mk2.model.diffusion.conv1d_components import Conv1dBlock, Downsample1d, Upsample1d
+
+
+
+class ConditionalResidualBlock1D(nn.Module):
+    def __init__(self,
+            in_channels,
+            out_channels,
+            cond_dim,
+            kernel_size=3,
+            n_groups=8):
+        super().__init__()
+
+        self.blocks = nn.ModuleList([
+            Conv1dBlock(in_channels, out_channels, kernel_size, n_groups=n_groups),
+            Conv1dBlock(out_channels, out_channels, kernel_size, n_groups=n_groups),
+        ])
+
+        # FiLM modulation https://arxiv.org/abs/1709.07871
+        # predicts per-channel scale and bias
+        cond_channels = out_channels * 2
+        self.out_channels = out_channels
+        self.cond_encoder = nn.Sequential(
+            nn.Mish(),
+            nn.Linear(cond_dim, cond_channels),
+            nn.Unflatten(-1, (-1, 1))
+        )
+
+        # make sure dimensions compatible
+        self.residual_conv = nn.Conv1d(in_channels, out_channels, 1) \
+            if in_channels != out_channels else nn.Identity()
+
+    def forward(self, x, cond):
+        '''
+            x : [ batch_size x in_channels x horizon ]
+            cond : [ batch_size x cond_dim]
+
+            returns:
+            out : [ batch_size x out_channels x horizon ]
+        '''
+        out = self.blocks[0](x)
+        embed = self.cond_encoder(cond)
+
+        embed = embed.reshape(
+            embed.shape[0], 2, self.out_channels, 1)
+        scale = embed[:,0,...]
+        bias = embed[:,1,...]
+        out = scale * out + bias
+
+        out = self.blocks[1](out)
+        out = out + self.residual_conv(x)
+        return out
+
+
+class ConditionalUnet1D(nn.Module):
+    def __init__(self,
+        input_dim,
+        global_cond_dim,
+        num_points=15,
+        diffusion_step_embed_dim=256,
+        down_dims=[256,512,1024],
+        kernel_size=5,
+        n_groups=8
+        ):
+        """
+        input_dim: Dim of actions.
+        global_cond_dim: Dim of global conditioning applied with FiLM
+          in addition to diffusion step embedding. This is usually obs_horizon * obs_dim
+        diffusion_step_embed_dim: Size of positional encoding for diffusion iteration k
+        down_dims: Channel size for each UNet level.
+          The length of this array determines numebr of levels.
+        kernel_size: Conv kernel size
+        n_groups: Number of groups for GroupNorm
+        """
+        super().__init__()
+
+       # Shared encoder for observations
+        self.obs_encoder = nn.Sequential(
+            nn.Linear(global_cond_dim, 512),
+            nn.ReLU(),
+            nn.Linear(512, 256),
+            nn.ReLU(),
+            nn.Linear(256, 128)
+        )
+        
+        # Index classifier (discrete prediction)
+        self.index_classifier = nn.Sequential(
+            nn.Linear(128, 64),
+            nn.ReLU(),
+            nn.Dropout(0.1),
+            nn.Linear(64, num_points)
+        )
+        
+        # Trajectory diffusion model (continuous prediction)
+        encoded_cond_dim = 128
+        all_dims = [input_dim] + list(down_dims)
+        start_dim = down_dims[0]
+
+        dsed = diffusion_step_embed_dim
+        self.diffusion_step_encoder = nn.Sequential(
+            SinusoidalPosEmb(dsed),
+            nn.Linear(dsed, dsed * 4),
+            nn.Mish(),
+            nn.Linear(dsed * 4, dsed),
+        )
+        cond_dim = dsed + encoded_cond_dim
+
+        in_out = list(zip(all_dims[:-1], all_dims[1:]))
+        mid_dim = all_dims[-1]
+        
+        self.mid_modules = nn.ModuleList([
+            ConditionalResidualBlock1D(
+                mid_dim, mid_dim, cond_dim=cond_dim,
+                kernel_size=kernel_size, n_groups=n_groups
+            ),
+            ConditionalResidualBlock1D(
+                mid_dim, mid_dim, cond_dim=cond_dim,
+                kernel_size=kernel_size, n_groups=n_groups
+            ),
+        ])
+
+        down_modules = nn.ModuleList([])
+        for ind, (dim_in, dim_out) in enumerate(in_out):
+            is_last = ind >= (len(in_out) - 1)
+            down_modules.append(nn.ModuleList([
+                ConditionalResidualBlock1D(
+                    dim_in, dim_out, cond_dim=cond_dim,
+                    kernel_size=kernel_size, n_groups=n_groups),
+                ConditionalResidualBlock1D(
+                    dim_out, dim_out, cond_dim=cond_dim,
+                    kernel_size=kernel_size, n_groups=n_groups),
+                Downsample1d(dim_out) if not is_last else nn.Identity()
+            ]))
+
+        up_modules = nn.ModuleList([])
+        for ind, (dim_in, dim_out) in enumerate(reversed(in_out[1:])):
+            is_last = ind >= (len(in_out) - 1)
+            up_modules.append(nn.ModuleList([
+                ConditionalResidualBlock1D(
+                    dim_out*2, dim_in, cond_dim=cond_dim,
+                    kernel_size=kernel_size, n_groups=n_groups),
+                ConditionalResidualBlock1D(
+                    dim_in, dim_in, cond_dim=cond_dim,
+                    kernel_size=kernel_size, n_groups=n_groups),
+                Upsample1d(dim_in) if not is_last else nn.Identity()
+            ]))
+
+        final_conv = nn.Sequential(
+            Conv1dBlock(start_dim, start_dim, kernel_size=kernel_size),
+            nn.Conv1d(start_dim, input_dim, 1),
+        )
+
+        self.down_modules = down_modules
+        self.up_modules = up_modules
+        self.final_conv = final_conv
+
+    def forward(self, 
+                sample: torch.Tensor,
+                timestep: Union[torch.Tensor, float, int],
+                global_cond: torch.Tensor,
+                predict_index: bool = True):
+        """
+        sample: (B, T, 3) - dx, dy, dtheta trajectory
+        timestep: diffusion timestep
+        global_cond: (B, obs_dim) - observations
+        predict_index: whether to predict grasp index
+        """
+        
+        # Encode observations
+        encoded_obs = self.obs_encoder(global_cond)
+        
+        results = {}
+        
+        # Predict grasp index (deterministic)
+        if predict_index:
+            index_logits = self.index_classifier(encoded_obs)
+            results['index_logits'] = index_logits
+        
+        # Diffusion for trajectory
+        sample = sample.moveaxis(-1, -2)  # (B, 3, T)
+        
+        # Time embedding
+        timesteps = timestep
+        if not torch.is_tensor(timesteps):
+            timesteps = torch.tensor([timesteps], dtype=torch.long, device=sample.device)
+        elif torch.is_tensor(timesteps) and len(timesteps.shape) == 0:
+            timesteps = timesteps[None].to(sample.device)
+        timesteps = timesteps.expand(sample.shape[0])
+
+        time_feature = self.diffusion_step_encoder(timesteps)
+        
+        # Combine time and observation features
+        global_feature = torch.cat([time_feature, encoded_obs], axis=-1)
+
+        # UNet forward pass
+        x = sample
+        h = []
+        for idx, (resnet, resnet2, downsample) in enumerate(self.down_modules):
+            x = resnet(x, global_feature)
+            x = resnet2(x, global_feature)
+            h.append(x)
+            x = downsample(x)
+
+        for mid_module in self.mid_modules:
+            x = mid_module(x, global_feature)
+
+        for idx, (resnet, resnet2, upsample) in enumerate(self.up_modules):
+            x = torch.cat((x, h.pop()), dim=1)
+            x = resnet(x, global_feature)
+            x = resnet2(x, global_feature)
+            x = upsample(x)
+
+        x = self.final_conv(x)
+        x = x.moveaxis(-1, -2)  # (B, T, 3)
+        
+        results['trajectory'] = x
+        return results
+    
+
+if __name__ == "__main__":
+    # Test
+    obs_dim = 63
+    obs_horizon = 2
+    action_dim = 3
+    pred_horizon = 16
+
+
+    model = ConditionalUnet1D(
+        input_dim=action_dim,
+        global_cond_dim=obs_dim*obs_horizon,
+        num_points=15,
+    )        
+    noised_action = torch.randn((1, pred_horizon, action_dim)) 
+    obs = torch.zeros((1, obs_horizon, obs_dim))  
+    diffusion_iter = torch.zeros((1,))
+
+    noise = model(
+        sample=noised_action,
+        timestep=diffusion_iter,
+        global_cond=obs.flatten(start_dim=1),
+        predict_index=True,
+    )
+    print(f"Noise shape = {noise['index_logits']}, Expected shape = [1, {pred_horizon}, {action_dim}]")  # Expected: (1, pred_horizon, action_dim)

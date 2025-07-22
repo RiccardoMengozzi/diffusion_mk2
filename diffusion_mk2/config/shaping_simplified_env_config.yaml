@@ -1,5 +1,5 @@
 inference:
-  model_path: weights/chkp_visionary-cloud-48_epoch_1000.pt
+  model_path: weights/chkp_fiery-resonance-53_epoch_44400.pt
   n_episodes: 10
   n_actions: 10
 

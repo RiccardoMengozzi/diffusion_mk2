@@ -81,6 +81,7 @@ class InferenceConfig:
     n_episodes: int = 1
     n_actions: int = 1
     plot: bool = False
+    interactive: bool = False
 
 @dataclass
 class ShapingConfig:
@@ -148,3 +149,5 @@ class ShapingConfig:
             self.simulation.camera.record = args.record
         if args.plot is not None:
             self.inference.plot = args.plot
+        if args.interactive is not None:
+            self.inference.interactive = args.interactive

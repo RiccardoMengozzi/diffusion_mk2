@@ -11,8 +11,28 @@ from genesis.engine.entities import RigidEntity, MPMEntity
 from genesis.engine.entities.rigid_entity import RigidLink
 from diffusion_mk2.config.shaping_simplified_env_config import ShapingConfig
 from diffusion_mk2.utils import dlo_computations
-from diffusion_mk2.utils.dlo_shapes import ONE_ACTION_SHAPE2
+from diffusion_mk2.utils.dlo_shapes import ONE_ACTION_SHAPE
 from diffusion_mk2.inference.shaping_simplified_inference import ShapingInference
+
+
+TARGET_SHAPE = [
+    [0.4971795082092285, 0.06608334928750992, 0.70304936170578],
+    [0.48991748690605164, 0.05649082362651825, 0.7035868167877197],
+    [0.48125380277633667, 0.04498031362891197, 0.7033566236495972],
+    [0.473725289106369, 0.033241044729948044, 0.7035053372383118],
+    [0.4686245024204254, 0.020060278475284576, 0.7036296725273132],
+    [0.4683994948863983, 0.005853438284248114, 0.7035524845123291],
+    [0.4727226495742798, -0.007205371279269457, 0.7044308185577393],
+    [0.48160067200660706, -0.01904521882534027, 0.7035982012748718],
+    [0.4905693233013153, -0.029685532674193382, 0.7035753726959229],
+    [0.4981439411640167, -0.04192333295941353, 0.7033624649047852],
+    [0.5022957921028137, -0.05520521104335785, 0.7035089731216431],
+    [0.5034895539283752, -0.06926996260881424, 0.7036325335502625],
+    [0.5025915503501892, -0.08352113515138626, 0.7034040093421936],
+    [0.5009478330612183, -0.09729688614606857, 0.7035539746284485],
+    [0.49931231141090393, -0.10976485162973404, 0.7038938403129578],
+]
+
 
 PROJECT_FOLDER = os.path.dirname(
     os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -54,11 +74,11 @@ class ShapingSimplifiedEnv:
         )
 
         self.cam = self.scene.add_camera(
-            res    = self.config.simulation.camera.resolution,
-            pos    = self.config.simulation.camera.position,
-            lookat = self.config.simulation.camera.lookat,
-            fov    = self.config.simulation.camera.fov,
-            GUI    = self.config.simulation.camera.gui
+            res=self.config.simulation.camera.resolution,
+            pos=self.config.simulation.camera.position,
+            lookat=self.config.simulation.camera.lookat,
+            fov=self.config.simulation.camera.fov,
+            GUI=self.config.simulation.camera.gui,
         )
 
         ########################## entities ##########################
@@ -142,16 +162,20 @@ class ShapingSimplifiedEnv:
                 0.0,
             ]
         )
-        self.model = ShapingInference(ckp_path=self.config.inference.model_path,
-                                 device="cuda" if not self.config.simulation.cpu else "cpu",
-                                 num_timesteps=10)
+        self.model = ShapingInference(
+            ckp_path=self.config.inference.model_path,
+            device="cuda" if not self.config.simulation.cpu else "cpu",
+            num_timesteps=10,
+        )
 
         self.obs_horizon = self.model.obs_horizon
 
         # Initialize observation buffer
-        self.target = np.array(ONE_ACTION_SHAPE2)
+        self.target = np.array(TARGET_SHAPE)
         obs = self.get_obs()
-        self.obs_deque = collections.deque([obs] * self.obs_horizon, maxlen=self.obs_horizon)
+        self.obs_deque = collections.deque(
+            [obs] * self.obs_horizon, maxlen=self.obs_horizon
+        )
 
         self.ready_to_plot = False
         self.current_pred_action = None
@@ -172,8 +196,28 @@ class ShapingSimplifiedEnv:
         target_shape = self.target[:, :2]
         pred_action = self.current_pred_action[:, 1:3]
 
-        self._ax.plot(current_dlo_shape[:, 0], current_dlo_shape[:, 1], "o-", label="DLO", linewidth=2, markersize=4)
-        self._ax.plot(target_shape[:, 0], target_shape[:, 1], "o-", label="Target", linewidth=2, markersize=4)
+        self._ax.plot(
+            current_dlo_shape[:, 0],
+            current_dlo_shape[:, 1],
+            "o-",
+            label="DLO",
+            linewidth=2,
+            markersize=4,
+        )
+        self._ax.plot(
+            target_shape[:, 0],
+            target_shape[:, 1],
+            "o-",
+            label="Target",
+            linewidth=2,
+            markersize=4,
+        )
+        self._ax.scatter(
+            current_dlo_shape[0, 0], current_dlo_shape[0, 1], marker="x", s=60, c="b"
+        )
+        self._ax.scatter(
+            target_shape[0, 0], target_shape[0, 1], marker="x", s=60, c="r"
+        )
 
         if pred_action is not None:
             pred_pt = []
@@ -182,7 +226,14 @@ class ShapingSimplifiedEnv:
                 pt += delta
                 pred_pt.append(pt.copy())
             pred_pt = np.array(pred_pt)
-            self._ax.plot(pred_pt[:, 0], pred_pt[:, 1], "^-", label="Predicted Action", linewidth=2, markersize=4)
+            self._ax.plot(
+                pred_pt[:, 0],
+                pred_pt[:, 1],
+                "^-",
+                label="Predicted Action",
+                linewidth=2,
+                markersize=4,
+            )
 
         self._ax.set_xlabel("X")
         self._ax.set_ylabel("Y")
@@ -193,7 +244,6 @@ class ShapingSimplifiedEnv:
 
         self._fig.canvas.draw()
         self._fig.canvas.flush_events()
-
 
     def _step(self):
         start_time = time.time()
@@ -208,10 +258,8 @@ class ShapingSimplifiedEnv:
         if self.config.inference.plot and self.ready_to_plot:
             self.plot()
 
-
         if self.config.simulation.show_real_time_factor:
             print(f"Real-time factor: {self.real_time_factor:.2f}")
-
 
     def reset_robot_pose(self):
         # Place robot above centre of the rope
@@ -242,17 +290,15 @@ class ShapingSimplifiedEnv:
 
         self.franka.set_qpos(qpos)
 
-
     def reset_dlo_pose(self):
         self.dlo.set_pos(self.dlo._sim.cur_substep_local, self.dlo_init_pos)
-
 
     def reset_episode(self):
         """Reset the environment for a new episode."""
         self.scene.clear_debug_objects()
 
         # Choose new target
-        self.target = np.array(ONE_ACTION_SHAPE2)
+        self.target = np.array(TARGET_SHAPE)
         dlo_computations.draw_skeleton(self.target, self.scene, self.config.dlo.radius)
 
         # Reset robot pose
@@ -260,7 +306,7 @@ class ShapingSimplifiedEnv:
 
         # Reset DLO pose
         self.reset_dlo_pose()
-       
+
         self._step()
 
     def reset_action(self):
@@ -277,16 +323,22 @@ class ShapingSimplifiedEnv:
 
     def get_obs(self):
         pos_ee = self.end_effector.get_pos().cpu().numpy()[:2]
-        theta = R.from_quat(self.end_effector.get_quat().cpu().numpy()).as_euler('xyz')[0] # dont ask why [0], but it works
+        theta = R.from_quat(self.end_effector.get_quat().cpu().numpy()).as_euler("xyz")[
+            0
+        ]  # dont ask why [0], but it works
         obs_ee = np.array([pos_ee[0], pos_ee[1], theta])
-        obs_dlo = dlo_computations.get_skeleton(self.dlo.get_particles(),
-                                            downsample_number=self.config.dlo.number_of_particles,
-                                            average_number=self.config.dlo.particles_smoothing)[:, :2]  # Only x and y coordinates of the DLO
+        obs_dlo = dlo_computations.get_skeleton(
+            self.dlo.get_particles(),
+            downsample_number=self.config.dlo.number_of_particles,
+            average_number=self.config.dlo.particles_smoothing,
+        )[
+            :, :2
+        ]  # Only x and y coordinates of the DLO
         obs_target = self.target[:, :2]  # Only x and y coordinates of the target
         obs_ee = np.array(obs_ee).flatten()
         obs_dlo = np.array(obs_dlo).flatten()
         obs_target = np.array(obs_target).flatten()
-        obs = np.concatenate([obs_ee, obs_dlo, obs_target]) 
+        obs = np.concatenate([obs_ee, obs_dlo, obs_target])
         return obs
 
     def draw_trajectory(self, traj):
@@ -295,6 +347,7 @@ class ShapingSimplifiedEnv:
         target_pos[2] -= self.config.franka.end_effector.offset
 
         for i, action in enumerate(traj):
+            print(i)
             # Red to blue gradient
             t = i / (len(action) - 1)
             color = [1.0 - t, 0.0, t, 1.0]
@@ -309,8 +362,9 @@ class ShapingSimplifiedEnv:
                 radius=0.001,
             )
 
-
-    def execute_action(self, target_pos, target_quat, gripper="open", path_period=1.0, tolerance=1e-7):
+    def execute_action(
+        self, target_pos, target_quat, gripper="open", path_period=1.0, tolerance=1e-7
+    ):
         qpos = self.franka.inverse_kinematics(
             link=self.end_effector,
             pos=target_pos,
@@ -322,11 +376,11 @@ class ShapingSimplifiedEnv:
         elif gripper == "close":
             force_control = [-1.0, -1.0]
             # qpos[-2:] = self.config.franka.end_effector.gripper_close_position
-        
+
         path = self.franka.plan_path(
             qpos_goal=qpos,
             num_waypoints=int(path_period // self.config.simulation.dt),
-            ignore_collision=True, # Otherwise cannot grasp in a good way the rope
+            ignore_collision=True,  # Otherwise cannot grasp in a good way the rope
         )
 
         # Control the robot along the path
@@ -337,39 +391,51 @@ class ShapingSimplifiedEnv:
             self._step()
 
             # Check if the robot has reached the target position
-            if np.linalg.norm(qpos.cpu().numpy() - self.franka.get_qpos().cpu().numpy()) < tolerance:
+            if (
+                np.linalg.norm(
+                    qpos.cpu().numpy() - self.franka.get_qpos().cpu().numpy()
+                )
+                < tolerance
+            ):
                 break
 
-    def execute_trajectory(self, traj):
+    def grasp(self, pred_idx):
         # Grasp
-        pred_idx = int(traj[0, 0])
+        pred_idx = int(pred_idx)
+
         skeleton = dlo_computations.get_skeleton(
             self.dlo.get_particles(),
             downsample_number=self.config.dlo.number_of_particles,
             average_number=self.config.dlo.particles_smoothing,
         )
+
+        if self.config.inference.interactive:
+            pred_idx = int(
+                input(f"Select particle index to grasp (0-{len(skeleton)-1}): ")
+            )
+
         target_pos, target_quat = dlo_computations.compute_pose_from_paticle_index(
             skeleton,
             pred_idx,
             self.config.franka.end_effector.rot_offset,
             self.config.franka.end_effector.offset,
         )
-        print("target_quat", target_quat)
-        print("initial target_quat", self.initial_pose[3:7])
+
         self.execute_action(
             target_pos=target_pos,
             target_quat=target_quat,
             gripper="open",
-            path_period=2.0,
+            path_period=1.0,
         )
 
         self.execute_action(
             target_pos=target_pos,
             target_quat=target_quat,
             gripper="close",
-            path_period=1.0,
+            path_period=0.5,
         )
 
+    def execute_trajectory(self, traj):
         # Execute action
         for action in traj:
             dx, dy, dt = action[1:4]
@@ -388,7 +454,7 @@ class ShapingSimplifiedEnv:
                 target_pos=target_pos,
                 target_quat=target_quat,
                 gripper="close",
-                path_period=0.5,
+                path_period=0.2,
             )
 
         # Release
@@ -397,9 +463,8 @@ class ShapingSimplifiedEnv:
             target_pos=target_pos,
             target_quat=target_quat,
             gripper="open",
-            path_period=1.0,
+            path_period=0.5,
         )
-
 
     def run(self):
         if self.config.simulation.camera.record:
@@ -409,9 +474,7 @@ class ShapingSimplifiedEnv:
             self.reset_episode()
             for _ in tqdm(range(self.config.inference.n_actions), desc="Actions"):
                 self.reset_action()
-                self.ready_to_plot = True
                 obs = self.get_obs()
-
                 self.obs_deque.append(obs)
                 obs = np.stack(self.obs_deque)
                 obs = obs.reshape(self.model.obs_horizon, -1)
@@ -419,15 +482,30 @@ class ShapingSimplifiedEnv:
                 pred_action, pred_actions = self.model.run_inference(
                     observation=obs,
                 )
-                self.current_pred_action = pred_action
-                self.draw_trajectory(pred_action)
-                self.execute_trajectory(pred_action)
+                print("pred_action.shape", pred_action.shape)
+
+                self.grasp(pred_action[0, 0])
+                # self.grasp(0)
+                self.ready_to_plot = True
+                for _ in tqdm(range(2), desc="Steps"):
+                    obs = self.get_obs()
+
+                    self.obs_deque.append(obs)
+                    obs = np.stack(self.obs_deque)
+                    obs = obs.reshape(self.model.obs_horizon, -1)
+                    pred_action, pred_actions = self.model.run_inference(
+                        observation=obs,
+                    )
+                    self.current_pred_action = pred_action
+                    self.draw_trajectory(pred_action)
+                    self.execute_trajectory(pred_action)
 
         if self.config.simulation.camera.record:
-            self.cam.stop_recording(save_to_filename='video.mp4', fps=60)
+            self.cam.stop_recording(save_to_filename="video.mp4", fps=60)
         if self.config.inference.plot:
             plt.ioff()
             plt.close("all")
+
 
 def main():
     parser = argparse.ArgumentParser(description="Teleop Push Data Generator")
@@ -454,8 +532,9 @@ def main():
     parser.add_argument(
         "-r", "--record", action="store_true", help="Record the simulation"
     )
+    parser.add_argument("-p", "--plot", action="store_true", help="Plot the results")
     parser.add_argument(
-        "-p", "--plot", action="store_true", help="Plot the results"
+        "-i", "--interactive", action="store_true", help="Run in interactive mode"
     )
     args = parser.parse_args()
 

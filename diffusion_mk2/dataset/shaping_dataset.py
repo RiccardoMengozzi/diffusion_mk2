@@ -163,6 +163,7 @@ class ShapingDataset(torch.utils.data.Dataset):
         idxs = data["idx"]
 
 
+
         ee_states_stats = normalization_pca.get_data_stats(ee_states)
         dlo_states_stats = normalization_pca.get_data_stats(dlo_states.reshape(-1, 3))
         target_shapes_stats = normalization_pca.get_data_stats(target_shapes.reshape(-1, 3))

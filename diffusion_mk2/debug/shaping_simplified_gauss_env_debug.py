@@ -8,7 +8,7 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 from diffusion_mk2.model import normalization_pca
 from diffusion_mk2.dataset.shaping_dataset import ShapingDataset
-from diffusion_mk2.inference.shaping_simplified_inference_class import ShapingInference
+from diffusion_mk2.inference.shaping_simplified_inference_gauss import ShapingInference
 import collections
 
 

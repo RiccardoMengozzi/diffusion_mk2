@@ -180,6 +180,7 @@ def plot(
         pred_pt = []
         print("pred_idx", pred_idx)
         pt = dlo_states[pred_idx, :2].copy()  # Start from predicted DLO point
+        # pt = ee_states[:2].copy()  # Start from end-effector position
         for delta in pred_delta:
             pt += delta
             pred_pt.append(pt.copy())  
@@ -207,7 +208,7 @@ def plot(
 def main():
     # Configuration
     project_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    dataset_path = os.path.join(project_dir, "zarr_data", "combined_dataset_simplified.zarr.zip")
+    dataset_path = os.path.join(project_dir, "zarr_data", "one_action_dataset_simplified.zarr.zip")
     
     obs_ee_dim = 5  # [x, y, z, θ, grip]
     obs_shape_dim = 45  # 15 points * 3
@@ -233,7 +234,7 @@ def main():
     action_orig_simplified = action_orig[:, [0, 1, 3]]
 
     model = ShapingInference(
-        ckp_path= os.path.join(project_dir, "weights", "chkp_radiant-haze-49_epoch_3000.pt"),
+        ckp_path= os.path.join(project_dir, "weights", "chkp_fiery-resonance-53_epoch_44400.pt"),
         num_timesteps=10,
         verbose=False
     )
