@@ -394,7 +394,8 @@ class DiffusionTrainer:
         
         idx_loss = nn.functional.cross_entropy(noise_pred["index_logits"], idxs)
 
-        loss = traj_loss + idx_loss
+
+        loss = traj_loss + idx_loss / 2
 
         # Backpropagate and step optimizer + scheduler
         loss.backward()
