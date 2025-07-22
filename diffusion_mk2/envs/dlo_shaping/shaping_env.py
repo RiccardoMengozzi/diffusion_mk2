@@ -425,7 +425,7 @@ class ShapingEnv():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Teleop Push Data Generator")
-    parser.add_argument("--cfg", type=str, default="diffusion_mk2/config/shaping_prediction_env_config.yaml", help="Path to the configuration file")
+    parser.add_argument("--cfg", type=str, default="diffusion_mk2/config/shaping_traj_prediction_env_config.yaml", help="Path to the configuration file")
     parser.add_argument("-v", "--vis", action="store_true")
     parser.add_argument("-g", "--gui", action="store_true", help="Enable GUI mode")
     parser.add_argument("-c", "--cpu", action="store_true", help="Run on CPU instead of GPU")
